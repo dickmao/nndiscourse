@@ -1,5 +1,6 @@
 source "https://rubygems.org"
 
-# Specify your gem's dependencies in nndiscourse.gemspec
 gem 'discourse_api', github: 'dickmao/discourse_api', branch: 'dev'
-gem 'jsonrpc-client'
+
+# Specify your gem's dependencies in nndiscourse.gemspec
+gemspec

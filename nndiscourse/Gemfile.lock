@@ -1,0 +1,74 @@
+GIT
+  remote: https://github.com/dickmao/discourse_api.git
+  revision: 32910b3e33f6bf043b969fc6c0f6c231bc4fd91a
+  branch: dev
+  specs:
+    discourse_api (0.36.0)
+      faraday (~> 0.9)
+      faraday_middleware (~> 0.10)
+      rack (>= 1.6)
+
+PATH
+  remote: .
+  specs:
+    nndiscourse (0.1.0)
+      discourse_api
+      jimson (~> 0.11.0)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    blankslate (3.1.3)
+    diff-lcs (1.3)
+    domain_name (0.5.20190701)
+      unf (>= 0.0.5, < 1.0.0)
+    faraday (0.15.4)
+      multipart-post (>= 1.2, < 3)
+    faraday_middleware (0.13.1)
+      faraday (>= 0.7.4, < 1.0)
+    http-cookie (1.0.3)
+      domain_name (~> 0.5)
+    jimson (0.11.0)
+      blankslate (~> 3.1, >= 3.1.3)
+      multi_json (~> 1, >= 1.11.2)
+      rack (~> 1, >= 1.4.5)
+      rest-client (~> 1, >= 1.7.3)
+    mime-types (2.99.3)
+    multi_json (1.13.1)
+    multipart-post (2.1.1)
+    netrc (0.11.0)
+    rack (1.6.11)
+    rake (10.5.0)
+    rest-client (1.8.0)
+      http-cookie (>= 1.0.2, < 2.0)
+      mime-types (>= 1.16, < 3.0)
+      netrc (~> 0.7)
+    rspec (3.8.0)
+      rspec-core (~> 3.8.0)
+      rspec-expectations (~> 3.8.0)
+      rspec-mocks (~> 3.8.0)
+    rspec-core (3.8.2)
+      rspec-support (~> 3.8.0)
+    rspec-expectations (3.8.4)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.8.0)
+    rspec-mocks (3.8.1)
+      diff-lcs (>= 1.2.0, < 2.0)
+      rspec-support (~> 3.8.0)
+    rspec-support (3.8.2)
+    unf (0.1.4)
+      unf_ext
+    unf_ext (0.0.7.6)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  bundler (~> 2.0)
+  discourse_api!
+  nndiscourse!
+  rake (~> 10.0)
+  rspec (~> 3.2)
+
+BUNDLED WITH
+   2.0.2

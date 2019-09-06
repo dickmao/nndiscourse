@@ -1,0 +1,5 @@
+require 'nndiscourse'
+
+proc = Nndiscourse::Process.new('http://localhost:3000',
+                                'b28f0cea1b4fb749b9a3b8683760388c',
+                                'priapushk')

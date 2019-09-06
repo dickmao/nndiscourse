@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Keywords: news
 ;; URL: https://github.com/dickmao/nndiscourse
-;; Package-Requires: ((emacs "25") (request "20190819") (dash "20190401") (anaphora "20180618") (simple-httpd "20190110")
+;; Package-Requires: ((emacs "25") (request "20190819") (dash "20190401") (anaphora "20180618"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -55,46 +55,24 @@
 
 (nnoo-declare nndiscourse)
 
-(defconst nndiscourse-hacker-news-url "https://news.ycombinator.com")
-(defconst nndiscourse--group-ask "ask")
-(defconst nndiscourse--group-show "show")
-(defconst nndiscourse--group-job "job")
-(defconst nndiscourse--group-stories "news")
-
-(defcustom nndiscourse-render-story t
-  "If non-nil, follow link upon `gnus-summary-select-article'.
-
-Otherwise, just display link."
-  :type 'boolean
-  :group 'nndiscourse)
+(defcustom nndiscourse-public-keyfile (expand-file-name "~/.ssh/id_rsa.pub")
+  "Location of rsa private key."
+  :type '(file :must-match t)
+  :group 'nnhackernews)
 
 (defcustom nndiscourse-localhost "127.0.0.1"
-  "Some users keep their browser in a separate domain.
-
-Do not set this to \"localhost\" as a numeric IP is required for the oauth handshake."
+  "Some users keep their browser in a separate domain."
   :type 'string
   :group 'nndiscourse)
 
-(defcustom nndiscourse-max-items-per-scan 100
-  "Maximum items to fetch from firebase each refresh cycle."
+(defcustom nndiscourse-localhost 8999
+  "Some users use 8999 for something else."
   :type 'integer
   :group 'nndiscourse)
 
 (defvoo nndiscourse-status-string "")
 
-(defvar nndiscourse--last-item nil "Keep track of where we are.")
-
-(defvar nndiscourse--debug-request-items nil "Keep track of ids to re-request for testing.")
-
-(defvar nndiscourse--last-scan-time (truncate (float-time))
-  "Don't scan more than once every few seconds.")
-
-(defmacro nndiscourse--callback (result &optional callback)
-  "Set RESULT to return value of CALLBACK."
-  `(cl-function (lambda (&rest args &key data &allow-other-keys)
-                  (setq ,result (if ,callback
-                                    (apply ,callback args)
-                                  data)))))
+(defvar nndiscourse--last-id nil "Keep track of where we are.")
 
 (defsubst nndiscourse--gethash (string hashtable &optional dflt)
   "Get corresponding value of STRING from HASHTABLE, or DFLT if undefined.
@@ -115,6 +93,18 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
        (set (intern string hashtable) replace-with)
       (puthash string replace-with hashtable))))
 
+(defmacro nndiscourse--remhash (string hashtable)
+  "Remove STRING from HASHTABLE.
+
+Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  `(,(if (fboundp 'gnus-sethash)
+         'unintern
+       'remhash)
+    ,(if (fboundp 'gnus-sethash)
+         (cons 'intern (list string hashtable))
+       string)
+     ,hashtable))
+
 (defmacro nndiscourse--sethash (string value hashtable)
   "Set corresponding value of STRING to VALUE in HASHTABLE.
 
@@ -125,14 +115,18 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
     ,string ,value ,hashtable))
 
 (defmacro nndiscourse--maphash (func table)
-  "Map FUNC over TABLE, return nil.
+  "Map FUNC taking key and value over TABLE, return nil.
 
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  (declare (indent nil))
   `(,(if (fboundp 'gnus-gethash-safe)
          'mapatoms
        'maphash)
     ,(if (fboundp 'gnus-gethash-safe)
-         `(lambda (k) (funcall (apply-partially ,func (gnus-gethash-safe k ,table)) k))
+         `(lambda (k) (funcall
+                       (apply-partially
+                        ,func
+                        (symbol-name k) (gnus-gethash-safe k ,table))))
        func)
     ,table))
 
@@ -186,17 +180,6 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   (interactive)
   (nndiscourse-vote-current-article 1))
 
-(defvar nndiscourse--seq-map-indexed
-  (if (fboundp 'seq-map-indexed)
-      #'seq-map-indexed
-    (lambda (function sequence)
-      (let ((index 0))
-        (seq-map (lambda (elt)
-                   (prog1
-                       (funcall function elt index)
-                     (setq index (1+ index))))
-                 sequence)))))
-
 (defmacro nndiscourse--normalize-server ()
   "Disallow \"server\" from being empty string, which is unsettling.
 Normalize it to \"nndiscourse-default\"."
@@ -224,6 +207,48 @@ Normalize it to \"nndiscourse-default\"."
 
 (defvar nndiscourse-authors-hashtb (gnus-make-hashtable)
   "For fast lookup of parent-author (global over all entries).")
+
+(defun nndiscourse-first-to-succeed (&rest commands)
+  "Return output of first command among COMMANDS to succeed, NIL if none."
+  (let (conds)
+    (dolist (c
+             (nreverse commands)
+             (eval `(with-temp-buffer
+                      ,(cons 'cond conds))))
+      (push `((let ((_ (erase-buffer))
+                    (rv (apply #'call-process
+                               ,(substring c 0 (search " " c))
+                               nil (quote (t nil)) nil
+                               (split-string ,(aif (search " " c) (substring c (1+ it)) "")))))
+                (and (numberp rv) (zerop rv)))
+              (buffer-string))
+            conds))))
+
+(defun nndiscourse-rpc-get (&optional server)
+  "Retrieve the Jimson process for SERVER."
+  (nndiscourse--normalize-server)
+  (let ((proc (get-buffer-process (get-buffer-create (format " *%s*" server)))))
+    (unless proc
+      (let* ((ruby-command (append (list (executable-find "bundle") "exec" "rpc"))))
+        (when nndiscourse-log-rpc
+          (setq nndiscourse-rpc-log-filename
+                (concat (file-name-as-directory temporary-file-directory)
+                        "nndiscourse-rpc-log."))
+          (setq ruby-command (append ruby-command
+                                     (list "--log" nndiscourse-rpc-log-filename))))
+        (setq proc (make-process :name server
+                                 :buffer (get-buffer-create (format " *%s*" server))
+                                 :command ruby-command
+                                 :connection-type 'pipe
+                                 :noquery t
+                                 :sentinel #'nndiscourse-sentinel
+                                 :stderr (get-buffer-create (format " *%s-stderr*" server))))
+        (with-current-buffer (get-buffer-create (format " *%s-stderr*" server))
+          (add-hook 'after-change-functions
+                    (apply-partially 'nndiscourse--message-user server)
+                    nil t)))
+      (push proc nndiscourse-processes))
+    proc))
 
 (defsubst nndiscourse-get-headers (group)
   "List headers from GROUP."
@@ -280,18 +305,6 @@ If NOQUERY, return nil and avoid querying if not extant."
           ((string-match-p "^\\(Launch\\|Show\\) HN" title) nndiscourse--group-show)
           ((string-match-p "^\\(Ask\\|Tell\\) HN" title) nndiscourse--group-ask)
           (t nndiscourse--group-stories))))
-
-(defsubst nndiscourse--get-user-cookie ()
-  "Extract Discourse login from cookies."
-  (let* ((site (url-host (url-generic-parse-url nndiscourse-hacker-news-url))))
-    (cdr (assoc-string
-          "user"
-          (cl-loop with result
-                   for securep in '(t nil)
-                   do (setq result
-                            (request-cookie-alist site "/" securep))
-                   until result
-                   finally return result)))))
 
 (defsubst nndiscourse--domify (html)
   "Parse HTML into dom."
@@ -374,17 +387,6 @@ Remember `string-match-p' is always case-insensitive as is all elisp pattern mat
      :backend 'curl
      :success (nndiscourse--callback result #'nndiscourse--request-hidden-success))
     result))
-
-(defsubst nndiscourse--who-am-i ()
-  "Get my Discourse username."
-  (let ((user-cookie (nndiscourse--get-user-cookie)))
-    (unless user-cookie
-      (nndiscourse--request-login (format "%s/login" nndiscourse-hacker-news-url))
-      (setq user-cookie (nndiscourse--get-user-cookie)))
-    (if (stringp user-cookie)
-        (car (split-string user-cookie "&"))
-      (gnus-message 3 "nndiscourse--who-am-i: failed to get user-cookie")
-      "error")))
 
 (defsubst nndiscourse--append-header (plst &optional group)
   "Update data structures for PLST \"header\".
@@ -646,40 +648,6 @@ Otherwise *Group* buffer annoyingly overrepresents unread."
         (gnus-set-info gnus-newsgroup-name info)))
     t))
 
-(defsubst nndiscourse--json-read ()
-  "Copied from ein:json-read() by tkf."
-  (goto-char (point-max))
-  (backward-sexp)
-  (let ((json-object-type 'plist)
-        (json-array-type 'list))
-    (json-read)))
-
-(defun nndiscourse--request-max-item ()
-  "Retrieve the max-item from which all read-unread accounting stems."
-  (let (max-item)
-    (nndiscourse--request
-     "nndiscourse--request-max-item"
-     "https://hacker-news.firebaseio.com/v0/maxitem.json"
-     :parser 'nndiscourse--json-read
-     :success (nndiscourse--callback max-item))
-    max-item))
-
-(defun nndiscourse--request-newstories ()
-  "Return list of id's which we know to be stories (as opposed to comments)."
-  (let (stories)
-    (nndiscourse--request
-     "nndiscourse--request-newstories"
-     "https://hacker-news.firebaseio.com/v0/newstories.json"
-     :success (nndiscourse--callback
-               stories
-               (cl-function
-                (lambda (&key data &allow-other-keys)
-                  ;; manual recommended listify appends nil
-                  (append
-                   (eval (car (read-from-string (subst-char-in-string ?, ?\  data))))
-                   nil)))))
-    stories))
-
 (cl-defun nndiscourse--request (caller url
                                  &rest attributes &key parser (backend 'url-retrieve)
                                  &allow-other-keys)
@@ -878,47 +846,37 @@ Factor out commonality between text and link submit."
 
 (defun nndiscourse--request-item (id)
   "Retrieve ID as a property list."
-  (push id nndiscourse--debug-request-items)
-  (let ((utf-decoder (lambda (x)
+  (let ((rpc (json-rpc-connect nndiscourse-localhost nndiscourse-port))
+        (utf-decoder (lambda (x)
                        (decode-coding-string (with-temp-buffer
                                                (set-buffer-multibyte nil)
                                                (insert x)
                                                (buffer-string))
-                                             'utf-8)))
-        plst)
+                                             'utf-8))))
     (add-function :filter-return (symbol-function 'json-read-string) utf-decoder)
-    (nndiscourse--request
-     "nndiscourse--request-item"
-     (format "https://hacker-news.firebaseio.com/v0/item/%s.json" id)
-     :parser 'nndiscourse--json-read
-     :success (nndiscourse--callback plst))
-    (remove-function (symbol-function 'json-read-string) utf-decoder)
-    (when-let ((id (plist-get plst :id)))
-      (when (numberp id)
-        (setq plst (plist-put plst :id (number-to-string id))))
-      (-when-let* ((parent (plist-get plst :parent))
-                   (is-number (numberp parent)))
-        (setq plst (plist-put plst :parent (number-to-string parent))))
-      (unless (plist-get plst :score)
-        (setq plst (plist-put plst :score 0)))
-      plst)))
+    (condition-case err
+        (prog1 (json-rpc rpc "get_post" id)
+          (remove-function (symbol-function 'json-read-string) utf-decoder))
+      (error (gnus-message 3 "nndiscourse--request-item: %s" (error-message-string err))
+             (remove-function (symbol-function 'json-read-string) utf-decoder)
+             nil))))
 
-(defun nndiscourse--select-items (start-item max-item all-stories)
-  "Return a list of items to retrieve between START-ITEM and MAX-ITEM.
+(defun nndiscourse--select-items (start-item max-id all-stories)
+  "Return a list of items to retrieve between START-ITEM and MAX-ID.
 
-Since we are constrained by `nndiscourse-max-items-per-scan', we prioritize
+Since we are constrained by `nndiscourse-max-ids-per-scan', we prioritize
 ALL-STORIES and may throw away comments, etc."
   (mapcar
    #'number-to-string
-   (if (> (1+ (- max-item start-item)) nndiscourse-max-items-per-scan)
+   (if (> (1+ (- max-id start-item)) nndiscourse-max-ids-per-scan)
        (let* ((stories (seq-take-while (lambda (x) (>= x start-item))
                                        all-stories))
-              (excess (- nndiscourse-max-items-per-scan (length stories))))
+              (excess (- nndiscourse-max-ids-per-scan (length stories))))
          (if (<= excess 0)
-             (nreverse (cl-subseq stories 0 nndiscourse-max-items-per-scan))
+             (nreverse (cl-subseq stories 0 nndiscourse-max-ids-per-scan))
            (cl-loop with excess-count = 0
                     with j = 0
-                    for i from max-item downto start-item by 1
+                    for i from max-id downto start-item by 1
                     until (or (>= excess-count excess) (>= j (length stories)))
                     if (= i (elt stories j))
                     do (cl-incf j)
@@ -930,16 +888,16 @@ ALL-STORIES and may throw away comments, etc."
                                                      (cl-loop for k from 0 below
                                                               (- excess excess-count) by 1
                                                               collect (- i k)))))))
-     (cl-loop for i from start-item to max-item by 1
+     (cl-loop for i from start-item to max-id by 1
               collect i))))
 
-(defun nndiscourse--incoming (&optional static-max-item static-newstories)
+(defun nndiscourse--incoming (&optional static-max-id static-newstories)
   "Drink from the firehose.
 
-Optionally provide STATIC-MAX-ITEM and STATIC-NEWSTORIES to prevent querying out."
+Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
   (interactive)
   (setq nndiscourse--debug-request-items nil)
-  (unless nndiscourse--last-item
+  (unless nndiscourse--last-id
     (mapc (lambda (group)
             (-when-let* ((full-name (gnus-group-full-name group "nndiscourse:"))
                          (info (gnus-get-info full-name)))
@@ -949,17 +907,17 @@ Optionally provide STATIC-MAX-ITEM and STATIC-NEWSTORIES to prevent querying out
             ,nndiscourse--group-show
             ,nndiscourse--group-job
             ,nndiscourse--group-stories)))
-  (when-let ((max-item (or static-max-item (nndiscourse--request-max-item))))
+  (when-let ((max-id (or static-max-id (nndiscourse--request-max-id))))
     (let* ((stories (or static-newstories (nndiscourse--request-newstories)))
-           (earliest-story (nth (1- (min nndiscourse-max-items-per-scan
+           (earliest-story (nth (1- (min nndiscourse-max-ids-per-scan
                                          (length stories)))
                                 stories))
-           (start-item (if nndiscourse--last-item
-                           (1+ nndiscourse--last-item)
+           (start-item (if nndiscourse--last-id
+                           (1+ nndiscourse--last-id)
                          (min earliest-story
-                              (- max-item nndiscourse-max-items-per-scan))))
+                              (- max-id nndiscourse-max-ids-per-scan))))
            (counts (gnus-make-hashtable))
-           (items (nndiscourse--select-items start-item max-item stories)))
+           (items (nndiscourse--select-items start-item max-id stories)))
       (dolist (item items)
         (-when-let* ((plst (nndiscourse--request-item item))
                      (not-deleted (not (plist-get plst :deleted)))
@@ -975,7 +933,7 @@ Optionally provide STATIC-MAX-ITEM and STATIC-NEWSTORIES to prevent querying out
             (job (nndiscourse--append-header plst nndiscourse--group-job))
             ((story comment) (nndiscourse--append-header plst))
             (otherwise (gnus-message 5 "nndiscourse-incoming: ignoring type %s" type)))))
-      (setq nndiscourse--last-item max-item)
+      (setq nndiscourse--last-id max-id)
       (gnus-message
        5 (concat "nndiscourse--incoming: "
                  (format "%d requests, " (length nndiscourse--debug-request-items))
