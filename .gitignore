@@ -1,11 +1,7 @@
-# Compiled
 *.elc
-
-# Packaging
 .cask
-
-# Backup files
-*~
-
-# Undo-tree save-files
-*.~undo-tree
+nndiscourse-autoloads.el
+.rspec
+bin/
+vendor/
+nndiscourse*.gem

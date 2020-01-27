@@ -1,4 +1,6 @@
-source "https://rubygems.org"
+# frozen_string_literal: true
+
+source 'https://rubygems.org'
 
 gem 'discourse_api', github: 'dickmao/discourse_api', branch: 'dev'
 

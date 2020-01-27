@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Keywords: news
 ;; URL: https://github.com/dickmao/nndiscourse
-;; Package-Requires: ((emacs "25") (request "20190819") (dash "20190401") (anaphora "20180618"))
+;; Package-Requires: ((emacs "25.1") (request "20190819") (dash "20190401") (anaphora "20180618"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -230,12 +230,6 @@ Normalize it to \"nndiscourse-default\"."
   (let ((proc (get-buffer-process (get-buffer-create (format " *%s*" server)))))
     (unless proc
       (let* ((ruby-command (append (list (executable-find "bundle") "exec" "rpc"))))
-        (when nndiscourse-log-rpc
-          (setq nndiscourse-rpc-log-filename
-                (concat (file-name-as-directory temporary-file-directory)
-                        "nndiscourse-rpc-log."))
-          (setq ruby-command (append ruby-command
-                                     (list "--log" nndiscourse-rpc-log-filename))))
         (setq proc (make-process :name server
                                  :buffer (get-buffer-create (format " *%s*" server))
                                  :command ruby-command

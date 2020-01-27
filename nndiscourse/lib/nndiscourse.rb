@@ -1,9 +1,12 @@
+# frozen_string_literal: true
+
 require 'nndiscourse/version'
 require 'jimson'
 require 'discourse_api'
 require 'thor'
 
 module Nndiscourse
+  # This proxies DiscourseApi::Client
   class Handler < DiscourseApi::Client
     extend Jimson::Handler
     extend DiscourseApi::API::Categories
@@ -33,9 +36,9 @@ module Nndiscourse
       super(url, api_key, api_username, 'User-Api-Key', 'User-Api-Client-Id')
       @opts = opts
     end
-
   end
 
+  # Process contains a Jimson Server instance
   class Process
     attr_reader :opts
 
@@ -46,8 +49,7 @@ module Nndiscourse
     end
   end
 
+  # CLI documentation string
   class CLI < Thor
-
   end
-
 end

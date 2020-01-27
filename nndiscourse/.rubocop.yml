@@ -3,5 +3,11 @@ AllCops:
     - 'db/**/*'
     - 'config/**/*'
     - 'script/**/*'
-    - 'bin/{rails,rake}'
+    - 'vendor/**/*'
+    - 'bin/**/*'
     - !ruby/regexp /old_and_unused\.rb$/
+
+Layout/LineLength:
+  Max: 100
+  Exclude:
+    - !ruby/regexp /.*\.gemspec$/

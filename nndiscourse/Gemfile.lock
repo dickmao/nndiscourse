@@ -1,9 +1,9 @@
 GIT
   remote: https://github.com/dickmao/discourse_api.git
-  revision: 32910b3e33f6bf043b969fc6c0f6c231bc4fd91a
+  revision: 1f065398a1557c6208ae9342ad0cfe9d26dfb93b
   branch: dev
   specs:
-    discourse_api (0.36.0)
+    discourse_api (0.38.0.pre.dev)
       faraday (~> 0.9)
       faraday_middleware (~> 0.10)
       rack (>= 1.6)
@@ -14,51 +14,68 @@ PATH
     nndiscourse (0.1.0)
       discourse_api
       jimson (~> 0.11.0)
+      thor (~> 0.20.3)
 
 GEM
   remote: https://rubygems.org/
   specs:
+    ast (2.4.0)
     blankslate (3.1.3)
     diff-lcs (1.3)
     domain_name (0.5.20190701)
       unf (>= 0.0.5, < 1.0.0)
-    faraday (0.15.4)
+    faraday (0.17.3)
       multipart-post (>= 1.2, < 3)
-    faraday_middleware (0.13.1)
+    faraday_middleware (0.14.0)
       faraday (>= 0.7.4, < 1.0)
     http-cookie (1.0.3)
       domain_name (~> 0.5)
+    jaro_winkler (1.5.4)
     jimson (0.11.0)
       blankslate (~> 3.1, >= 3.1.3)
       multi_json (~> 1, >= 1.11.2)
       rack (~> 1, >= 1.4.5)
       rest-client (~> 1, >= 1.7.3)
     mime-types (2.99.3)
-    multi_json (1.13.1)
+    multi_json (1.14.1)
     multipart-post (2.1.1)
     netrc (0.11.0)
-    rack (1.6.11)
-    rake (10.5.0)
+    parallel (1.19.1)
+    parser (2.7.0.2)
+      ast (~> 2.4.0)
+    rack (1.6.12)
+    rainbow (3.0.0)
+    rake (11.3.0)
     rest-client (1.8.0)
       http-cookie (>= 1.0.2, < 2.0)
       mime-types (>= 1.16, < 3.0)
       netrc (~> 0.7)
-    rspec (3.8.0)
-      rspec-core (~> 3.8.0)
-      rspec-expectations (~> 3.8.0)
-      rspec-mocks (~> 3.8.0)
-    rspec-core (3.8.2)
-      rspec-support (~> 3.8.0)
-    rspec-expectations (3.8.4)
+    rspec (3.9.0)
+      rspec-core (~> 3.9.0)
+      rspec-expectations (~> 3.9.0)
+      rspec-mocks (~> 3.9.0)
+    rspec-core (3.9.1)
+      rspec-support (~> 3.9.1)
+    rspec-expectations (3.9.0)
       diff-lcs (>= 1.2.0, < 2.0)
-      rspec-support (~> 3.8.0)
-    rspec-mocks (3.8.1)
+      rspec-support (~> 3.9.0)
+    rspec-mocks (3.9.1)
       diff-lcs (>= 1.2.0, < 2.0)
-      rspec-support (~> 3.8.0)
-    rspec-support (3.8.2)
+      rspec-support (~> 3.9.0)
+    rspec-support (3.9.2)
+    rubocop (0.79.0)
+      jaro_winkler (~> 1.5.1)
+      parallel (~> 1.10)
+      parser (>= 2.7.0.1)
+      rainbow (>= 2.2.2, < 4.0)
+      ruby-progressbar (~> 1.7)
+      unicode-display_width (>= 1.4.0, < 1.7)
+    ruby-progressbar (1.10.1)
+    thor (0.20.3)
     unf (0.1.4)
       unf_ext
     unf_ext (0.0.7.6)
+    unicode-display_width (1.6.1)
 
 PLATFORMS
   ruby
@@ -67,8 +84,9 @@ DEPENDENCIES
   bundler (~> 2.0)
   discourse_api!
   nndiscourse!
-  rake (~> 10.0)
-  rspec (~> 3.2)
+  rake (~> 11.1)
+  rspec (~> 3.4)
+  rubocop (~> 0.69)
 
 BUNDLED WITH
    2.0.2
