@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/dickmao/discourse_api.git
-  revision: 1f065398a1557c6208ae9342ad0cfe9d26dfb93b
+  revision: 6783c8aecb20dbc86e0ed6c7ff69ae6ec8e9a8c4
   branch: dev
   specs:
     discourse_api (0.38.0.pre.dev)

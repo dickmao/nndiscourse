@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Keywords: news
 ;; URL: https://github.com/dickmao/nndiscourse
-;; Package-Requires: ((emacs "25.1") (request "20190819") (dash "20190401") (anaphora "20180618"))
+;; Package-Requires: ((emacs "25.1") (dash "20190401") (dash-functional "20180107") (anaphora "20180618"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -48,36 +48,57 @@
 (require 'cl-lib)
 (require 'json)
 (require 'subr-x)
-(require 'request)
 (require 'dash)
+(require 'dash-functional)
 (require 'anaphora)
-(require 'url-http)
+(require 'json-rpc)
 
 (nnoo-declare nndiscourse)
+
+(nnoo-define-basics nndiscourse)
+
+(defcustom nndiscourse-render-post t
+  "If non-nil, follow link upon `gnus-summary-select-article'.
+Otherwise, just display link."
+  :type 'boolean
+  :group 'nndiscourse)
 
 (defcustom nndiscourse-public-keyfile (expand-file-name "~/.ssh/id_rsa.pub")
   "Location of rsa private key."
   :type '(file :must-match t)
-  :group 'nnhackernews)
+  :group 'nndiscourse)
 
 (defcustom nndiscourse-localhost "127.0.0.1"
   "Some users keep their browser in a separate domain."
   :type 'string
   :group 'nndiscourse)
 
-(defcustom nndiscourse-localhost 8999
-  "Some users use 8999 for something else."
-  :type 'integer
-  :group 'nndiscourse)
-
-(defvoo nndiscourse-status-string "")
+(defvar nndiscourse-status-string "" "Out-of-band message.")
 
 (defvar nndiscourse--last-id nil "Keep track of where we are.")
+
+(defvar nndiscourse--debug-request-posts nil "Keep track of ids to re-request for testing.")
+
+(defvar nndiscourse--last-scan-time (- (truncate (float-time)) 100)
+  "Don't scan more than once every few seconds.")
+
+(defmacro nndiscourse--callback (result &optional callback)
+  "Set RESULT to return value of CALLBACK."
+  `(cl-function (lambda (&rest args &key data &allow-other-keys)
+                  (setq ,result (if ,callback
+                                    (apply ,callback args)
+                                  data)))))
+
+(defvar nndiscourse-processes nil
+  "Association list of ( server-name-qua-url . ruby-proc ).")
 
 (defsubst nndiscourse--gethash (string hashtable &optional dflt)
   "Get corresponding value of STRING from HASHTABLE, or DFLT if undefined.
 
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  (declare (indent defun))
+  (unless (stringp string)
+    (setq string (format "%s" string)))
   (if (fboundp 'gnus-gethash)
       (let ((sym (intern-soft string hashtable)))
         (if (or (null sym) (not (boundp sym))) dflt (symbol-value sym)))
@@ -87,32 +108,24 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   "Set value of STRING to FUNC applied to existing STRING value in HASHTABLE.
 
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  (declare (indent defun))
+  (unless (stringp string)
+    (setq string (format "%s" string)))
   (let* ((capture (nndiscourse--gethash string hashtable))
          (replace-with (funcall func capture)))
     (if (fboundp 'gnus-sethash)
        (set (intern string hashtable) replace-with)
       (puthash string replace-with hashtable))))
 
-(defmacro nndiscourse--remhash (string hashtable)
-  "Remove STRING from HASHTABLE.
-
-Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
-  `(,(if (fboundp 'gnus-sethash)
-         'unintern
-       'remhash)
-    ,(if (fboundp 'gnus-sethash)
-         (cons 'intern (list string hashtable))
-       string)
-     ,hashtable))
-
 (defmacro nndiscourse--sethash (string value hashtable)
   "Set corresponding value of STRING to VALUE in HASHTABLE.
 
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  (declare (indent defun))
   `(,(if (fboundp 'gnus-sethash)
          'gnus-sethash
        'puthash)
-    ,string ,value ,hashtable))
+    (format "%s" ,string) ,value ,hashtable))
 
 (defmacro nndiscourse--maphash (func table)
   "Map FUNC taking key and value over TABLE, return nil.
@@ -154,7 +167,7 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 
 \\{gnus-article-mode-map}
 "
-  :lighter " HN"
+  :lighter " Discourse"
   :keymap nndiscourse-article-mode-map)
 
 (define-minor-mode nndiscourse-summary-mode
@@ -162,7 +175,7 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 
 \\{nndiscourse-summary-mode-map}
 "
-  :lighter " HN"
+  :lighter " Discourse"
   :keymap nndiscourse-summary-mode-map)
 
 (defsubst nndiscourse-novote ()
@@ -180,24 +193,14 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   (interactive)
   (nndiscourse-vote-current-article 1))
 
-(defmacro nndiscourse--normalize-server ()
-  "Disallow \"server\" from being empty string, which is unsettling.
-Normalize it to \"nndiscourse-default\"."
-  `(let ((canonical "nndiscourse-default"))
-    (when (equal server "")
-      (setq server nil))
-    (unless server
-      (setq server canonical))
-    (unless (string= server canonical)
-      (error "nndiscourse--normalize-server: multiple servers unsupported!"))))
-
-(defvar nndiscourse-score-files nil "For `nndiscourse--ensure-score-file'.")
+(defvar nndiscourse-connections-hashtb (gnus-make-hashtable)
+  "Group -> jsonrpc connection struct.")
 
 (defvar nndiscourse-location-hashtb (gnus-make-hashtable)
   "Id -> ( group . index ).")
 
-(defvar nndiscourse-root-hashtb (gnus-make-hashtable)
-  "Id -> possibly ancient header.")
+(defvar nndiscourse-categories-hashtb (gnus-make-hashtable)
+  "Category id -> group.")
 
 (defvar nndiscourse-headers-hashtb (gnus-make-hashtable)
   "Group -> headers.")
@@ -208,194 +211,69 @@ Normalize it to \"nndiscourse-default\"."
 (defvar nndiscourse-authors-hashtb (gnus-make-hashtable)
   "For fast lookup of parent-author (global over all entries).")
 
-(defun nndiscourse-first-to-succeed (&rest commands)
-  "Return output of first command among COMMANDS to succeed, NIL if none."
-  (let (conds)
-    (dolist (c
-             (nreverse commands)
-             (eval `(with-temp-buffer
-                      ,(cons 'cond conds))))
-      (push `((let ((_ (erase-buffer))
-                    (rv (apply #'call-process
-                               ,(substring c 0 (search " " c))
-                               nil (quote (t nil)) nil
-                               (split-string ,(aif (search " " c) (substring c (1+ it)) "")))))
-                (and (numberp rv) (zerop rv)))
-              (buffer-string))
-            conds))))
-
-(defun nndiscourse-rpc-get (&optional server)
-  "Retrieve the Jimson process for SERVER."
-  (nndiscourse--normalize-server)
-  (let ((proc (get-buffer-process (get-buffer-create (format " *%s*" server)))))
-    (unless proc
-      (let* ((ruby-command (append (list (executable-find "bundle") "exec" "rpc"))))
-        (setq proc (make-process :name server
-                                 :buffer (get-buffer-create (format " *%s*" server))
-                                 :command ruby-command
-                                 :connection-type 'pipe
-                                 :noquery t
-                                 :sentinel #'nndiscourse-sentinel
-                                 :stderr (get-buffer-create (format " *%s-stderr*" server))))
-        (with-current-buffer (get-buffer-create (format " *%s-stderr*" server))
-          (add-hook 'after-change-functions
-                    (apply-partially 'nndiscourse--message-user server)
-                    nil t)))
-      (push proc nndiscourse-processes))
-    proc))
-
 (defsubst nndiscourse-get-headers (group)
   "List headers from GROUP."
   (nndiscourse--gethash group nndiscourse-headers-hashtb))
 
-(defun nndiscourse-find-header (id &optional noquery)
-  "Retrieve property list of ID.
-
-If NOQUERY, return nil and avoid querying if not extant."
-  (if-let ((location (nndiscourse--gethash id nndiscourse-location-hashtb)))
-      (cl-destructuring-bind (group . index) location
-        (nndiscourse--get-header (1+ index) group))
-    (unless noquery
-      (nndiscourse--request-item id))))
+(defun nndiscourse-find-header (id)
+  "Retrieve header (plst) of ID."
+  (when-let ((location (nndiscourse--gethash id nndiscourse-location-hashtb)))
+    (cl-destructuring-bind (group . index) location
+      (nndiscourse--get-header (1+ index) group))))
 
 (defsubst nndiscourse-refs-for (id)
   "Return descending ancestors as list for ID."
-  (cl-loop with root-plst
-           for prev-id = id then cur-id
-           for cur-id =
-           (let ((cached (nndiscourse--gethash prev-id
-                                                nndiscourse-refs-hashtb
-                                                'NULL)))
-             (if (eq cached 'NULL)
-                 (progn (setq root-plst (nndiscourse--request-item prev-id))
-                        (nndiscourse-add-entry nndiscourse-refs-hashtb
-                                                root-plst :parent)
-                        (plist-get root-plst :parent))
-               (setq root-plst (nndiscourse-find-header prev-id t))
-               cached))
-           until (null cur-id)
+  (cl-loop for prev-id = id then cur-id
+           for cur-id = (nndiscourse--gethash prev-id nndiscourse-refs-hashtb)
+           until (not cur-id)
            collect cur-id into rresult
-           finally do
-           (let ((result (nreverse rresult)))
-             (when (and result
-                        (string= (plist-get root-plst :id) (car result)))
-               (nndiscourse--sethash (car result) root-plst
-                                      nndiscourse-root-hashtb))
-             (cl-return result))))
+           finally return (nreverse rresult)))
 
-(defun nndiscourse--retrieve-root (header)
-  "Retrieve and cache property list HEADER root."
-  (if-let ((root-id (car (nndiscourse-refs-for (plist-get header :id)))))
-      (nndiscourse--gethash root-id nndiscourse-root-hashtb)
-    header))
+(defmacro nndiscourse--with-mutex (mtx &rest body)
+  "If capable of threading, lock with MTX and execute BODY."
+  (declare (indent defun))
+  (if (fboundp 'with-mutex)
+      `(with-mutex ,mtx ,@body)
+    `(progn ,@body)))
 
-(defun nndiscourse--group-for (header)
-  "Classify HEADER as one of ask, show, or news based on title."
-  (let* ((root-plst (nndiscourse--retrieve-root header))
-         (title (or (plist-get header :link_title) ""))
-         (type (or (plist-get root-plst :type) "")))
-    ;; string-match-p like all elisp searching is case-insensitive
-    (cond ((string= type "job") nndiscourse--group-job)
-          ((string-match-p "^\\(Launch\\|Show\\) HN" title) nndiscourse--group-show)
-          ((string-match-p "^\\(Ask\\|Tell\\) HN" title) nndiscourse--group-ask)
-          (t nndiscourse--group-stories))))
+(defvar nndiscourse--mutex-rpc-request (when (fboundp 'make-mutex)
+                                         (make-mutex "nndiscourse--mutex-rpc-request"))
+  "Only one jsonrpc output buffer, so avoid two requests using at the same time.")
 
-(defsubst nndiscourse--domify (html)
-  "Parse HTML into dom."
-  (with-temp-buffer
-    (insert html)
-    (if (fboundp 'libxml-parse-html-region)
-        (libxml-parse-html-region (point-min) (point-max))
-      (error "nndiscourse--domify: need libxml-parse-html-region"))))
+(defsubst nndiscourse--get-port (server)
+  "Return port of registered SERVER process."
+  (aif (alist-get server nndiscourse-processes nil nil #'equal)
+      (process-get it :service)))
 
-(cl-defun nndiscourse--request-login-success (&key data &allow-other-keys)
-  "After some time, logging in via browser recaptcha might be necessary.
+(defun nndiscourse-rpc-request (server method &rest args)
+  "Make jsonrpc call to SERVER invoking METHOD ARGS.
 
-Remember `string-match-p' is always case-insensitive as is all elisp pattern matching."
-  (when (and (stringp data)
-             (string-match-p (regexp-quote "validation required") data))
-    (display-warning
-     'nndiscourse
-     (concat "Recaptcha required.  Please login via browser and try again."))
-    (error "Recaptcha required"))
-  data)
+nnreddit had just one jsonrpyc process using stdio pipe for IPC.
+jsonrpyc could not assume HTTP.
 
-(defun nndiscourse--request-login (url &optional hidden)
-  "Store a cookie from URL with HIDDEN plist."
-  (let* (result
-         (auth-source-do-cache nil)
-         (auth-source-creation-prompts '((user . "news.ycombinator.com user: ")
-                                         (secret . "Password for %u: ")))
-         (found (car (auth-source-search :max 1 :host "news.ycombinator.com" :require
-                                         '(:user :secret) :create t))))
-    (nndiscourse--request
-     "nndiscourse--request-login"
-     url
-     :backend 'curl
-     :data (append
-            (cl-loop for (k v) on hidden by (function cddr)
-                     collect (cons (cl-subseq (symbol-name k) 1) v))
-            `(("acct" . ,(plist-get found :user))
-              ("pw" . ,(let ((secret (plist-get found :secret)))
-                         (if (functionp secret)
-                             (funcall secret)
-                           secret)))))
-     :success (nndiscourse--callback result #'nndiscourse--request-login-success))
-    result))
+The jimson library does assume HTTP, so we follow `json-rpc' SOP.
+This means two processes, one jimson process, which we administer,
+and one `json-rpc' network pipe which json-rpc.el administers.
 
-(defmacro nndiscourse--extract-hidden (dom hidden)
-  "Extract hidden tag-value pairs from DOM into plist HIDDEN."
-  `(-tree-map-nodes
-    (lambda (x)
-      (and (listp x)
-           (eq (car x) 'input)
-           (string= "hidden" (alist-get 'type (cl-second x)))
-           (not (string= "creating" (alist-get 'name (cl-second x))))))
-    (lambda (x)
-      (let ((keyname (intern (concat ":" (alist-get 'name (cl-second x))))))
-        (unless (plist-get ,hidden keyname)
-          (!cons (alist-get 'value (cl-second x)) ,hidden)
-          (!cons keyname ,hidden))))
-    ,dom))
+Process stays the same, but the `json-rpc' connection (a cheap struct) gets
+reinstantiated with every call.
 
-(cl-defun nndiscourse--request-hidden-success (&key data response &allow-other-keys)
-  "If necessary, login first, then return plist of :fnid and :fnop."
-  (let* ((dom (nndiscourse--domify data))
-         (form (car (alist-get 'form (alist-get 'body dom))))
-         (url (request-response-url response))
-         (path (car (url-path-and-query (url-generic-parse-url url))))
-         (login-p (aif (alist-get 'action form) (cl-search it path)))
-         hidden)
-    (nndiscourse--extract-hidden dom hidden)
-    (when login-p
-      (setq dom (nndiscourse--domify (nndiscourse--request-login url hidden)))
-      (nndiscourse--extract-hidden dom hidden))
-    hidden))
-
-(defun nndiscourse--request-hidden (url)
-  "Get the hidden fields (e.g., FNID, FNOP, HMAC) from URL."
-  (let (result)
-    (nndiscourse--request
-     "nndiscourse--request-hidden"
-     url
-     :backend 'curl
-     :success (nndiscourse--callback result #'nndiscourse--request-hidden-success))
-    result))
-
-(defsubst nndiscourse--append-header (plst &optional group)
-  "Update data structures for PLST \"header\".
-
-If GROUP classification omitted, figure it out."
-  (let* ((id (plist-get plst :id))
-         (group (or group (nndiscourse--group-for plst))))
-    (nndiscourse--sethash id
-                           (cons group (length (nndiscourse-get-headers group)))
-                           nndiscourse-location-hashtb)
-    (nndiscourse--sethash group (nconc (nndiscourse-get-headers group) (list plst))
-                           nndiscourse-headers-hashtb)
-    plst))
-
-(nnoo-define-basics nndiscourse)
+Return response of METHOD ARGS of type `json-object-type' or nil if failure."
+  (if (nndiscourse-open-server server)
+      (condition-case-unless-debug err
+          (let ((connection (json-rpc-connect nndiscourse-localhost
+                                              (nndiscourse--get-port server))))
+            (when-let ((threads-p (fboundp 'set-process-thread))
+                       (proc (json-rpc-process connection)))
+              (set-process-thread proc nil))
+            (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
+              (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
+                            (mapconcat (lambda (s) (format "%s" s)) args " "))
+              (json-rpc connection method args)))
+        (error (prog1 nil
+                 (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))
+    (prog1 nil
+      (gnus-message 3 "nndiscourse-rpc-request: could not retrieve jimson process"))))
 
 (defun nndiscourse-vote-current-article (vote)
   "VOTE is +1, -1, 0."
@@ -403,7 +281,7 @@ If GROUP classification omitted, figure it out."
   (if-let ((article-number (or (cdr gnus-article-current)
                                (gnus-summary-article-number))))
       (let* ((header (nndiscourse--get-header article-number
-                                           (gnus-group-real-name gnus-newsgroup-name)))
+                                              (gnus-group-real-name gnus-newsgroup-name)))
              (orig-score (format "%s" (plist-get header :score)))
              (new-score (if (zerop vote) orig-score
                           (concat orig-score " "
@@ -437,19 +315,92 @@ If GROUP classification omitted, figure it out."
 (deffoo nndiscourse-request-type (_group &optional _article)
   'news)
 
-(deffoo nndiscourse-server-opened (&optional server)
-  (nndiscourse--normalize-server)
-  t)
+(defsubst nndiscourse--server-buffer-name (server)
+  "Arbitrary proc buffer name for SERVER."
+  (when server
+    (format " *%s*" server)))
 
-(deffoo nndiscourse-status-message (&optional server)
-  (nndiscourse--normalize-server)
+(defsubst nndiscourse--server-buffer (server &optional create)
+  "Get proc buffer for SERVER.  Create if necessary if CREATE."
+  (when server
+    (let ((name (nndiscourse--server-buffer-name server)))
+      (if create
+          (get-buffer-create name)
+        (get-buffer name)))))
+
+(deffoo nndiscourse-server-opened (&optional server)
+  (nndiscourse--server-buffer server))
+
+(deffoo nndiscourse-status-message (&optional _server)
   "")
 
-(deffoo nndiscourse-open-server (_server &optional _defs)
-  t)
+(deffoo nndiscourse-open-server (server &optional _defs)
+  "Retrieve the Jimson process for SERVER."
+  (let* ((proc-buf (nndiscourse--server-buffer server t))
+         (proc (get-buffer-process proc-buf))
+         (server-name-qua-url (cl-second (gnus-server-to-method server))))
+    (if (process-live-p proc)
+        proc
+      (let* ((free-port (with-temp-buffer
+                          (let ((proc (make-network-process
+                                       :name "free-port"
+                                       :noquery t
+                                       :host nndiscourse-localhost
+                                       :buffer (current-buffer)
+                                       :server t
+                                       :stop t
+                                       :service t)))
+                            (prog1 (process-contact proc :service)
+                              (delete-process proc)))))
+             (ruby-command (split-string (format "%s exec thor cli:serve %s -p %s"
+                                                 (executable-find "bundle")
+                                                 server-name-qua-url
+                                                 free-port))))
+        (nndiscourse-register-process
+          server
+          (let ((default-directory (expand-file-name "nndiscourse"
+                                                     (file-name-directory
+                                                      (or (locate-library "nndiscourse")
+                                                          default-directory)))))
+            (make-process :name server
+                          :buffer proc-buf
+                          :command ruby-command
+                          :noquery t
+                          :sentinel #'nndiscourse-sentinel
+                          :stderr (get-buffer-create (format " *%s-stderr*" server)))))))))
 
-(deffoo nndiscourse-close-group (_group &optional server)
-  (nndiscourse--normalize-server)
+(defun nndiscourse-register-process (server proc)
+  "Keep tabs on SERVER's PROC.  Return PROC if success, nil otherwise."
+  (declare (indent defun))
+  (nndiscourse-deregister-process server)
+  (if (process-live-p proc)
+      (prog1 proc
+        (with-current-buffer (process-get proc :stderr)
+          (add-hook 'after-change-functions
+                    (apply-partially 'nndiscourse--message-user server)
+                    nil t))
+        (gnus-message 5 "`nndiscourse-register-process': registering %s"
+                      server (process-name proc))
+        (setf (alist-get server nndiscourse-processes nil nil #'equal) proc))
+    (prog1 nil
+      (gnus-message 3 "`nndiscourse-register-process': dead process %s %s"
+                    server (process-name proc))
+      (nndiscourse-deregister-process server))))
+
+(defun nndiscourse-deregister-process (server)
+  "Disavow any knowledge of SERVER's process."
+  (aif (alist-get server nndiscourse-processes nil nil #'equal)
+      (progn
+        (gnus-message 5 "`nndiscourse-deregister-process': deregistering %s %s pid=%s"
+                      server (process-name it) (process-id it))
+        (delete-process it)))
+  (setf (alist-get server nndiscourse-processes nil nil #'equal) nil))
+
+(deffoo nndiscourse-close-server (&optional server)
+  (aif (nndiscourse--server-buffer server)
+      (kill-buffer it)))
+
+(deffoo nndiscourse-close-group (_group &optional _server)
   t)
 
 (defmacro nndiscourse--with-group (group &rest body)
@@ -466,9 +417,8 @@ If GROUP classification omitted, figure it out."
     (let ((headers (nndiscourse-get-headers group)))
       (elt headers (1- article-number)))))
 
-(defun nndiscourse--get-body (header &optional server)
-  "Get full text of submission or comment HEADER at SERVER."
-  (nndiscourse--normalize-server)
+(defun nndiscourse--get-body (header)
+  "Get full text of submission or post HEADER."
   (if-let ((url (plist-get header :url)))
       (format "<div><p><a href=\"%s\">%s</a></div>" url url)
     (or (plist-get header :text) "")))
@@ -518,7 +468,7 @@ Originally written by Paul Issartel."
               "\n</pre><p>"))))
 
 (defun nndiscourse-add-entry (hashtb e field)
-  "Add to HASHTB the pair consisting of entry E's name to its FIELD."
+  "Add to HASHTB a lookup consisting of entry E's id to its FIELD."
   (nndiscourse--sethash (plist-get e :id) (plist-get e field) hashtb))
 
 (defsubst nndiscourse--summary-exit ()
@@ -529,91 +479,15 @@ Originally written by Paul Issartel."
   (add-function :after (symbol-function 'gnus-summary-exit)
                 (symbol-function 'nndiscourse--score-pending)))
 
-(defsubst nndiscourse--ensure-score-files (group)
-  "File I/O remains a perennial problem for score files for GROUP."
-  (if-let ((files (alist-get (intern group) nndiscourse-score-files)))
-      (condition-case nil
-        (progn
-          (dolist (file files t)
-            (gnus-score-load-score-alist file)))
-        (error nil))
-    t))
-
-(defsubst nndiscourse--rescore (group &optional force)
-  "Can't figure out GROUP hook that can remove itself (quine conundrum).
-
-FORCE is generally t unless coming from `nndiscourse--score-pending'."
-  (when (nndiscourse--gate group)
-    (cl-loop repeat 5
-             for ensured = (nndiscourse--ensure-score-files group)
-             until ensured
-             do (sleep-for 0 300)
-             finally (unless ensured
-                       (gnus-message 2 "nndiscourse--rescore: Bad score files %s!"
-                                     (alist-get (intern group)
-                                                nndiscourse-score-files))))
-    (let* ((num-headers (length (nndiscourse-get-headers
-                                 (gnus-group-real-name group))))
-           (marks (gnus-info-marks (nth 2 (gnus-group-entry group))))
-           (seen (or (cdr (--max-by (> (or (cdr it) 0) (or (cdr other) 0))
-                                    (alist-get 'seen marks)))
-                     0)))
-      (unless (zerop seen)
-        (when (or force (> num-headers seen))
-          (save-excursion
-            (let ((gnus-auto-select-subject nil)
-                  (gnus-summary-next-group-on-exit nil))
-              (gnus-summary-read-group group nil t)
-              (nndiscourse--summary-exit))))))))
-
-(defalias 'nndiscourse--score-pending
-  (lambda (&rest _args) (nndiscourse--rescore (gnus-group-name-at-point))))
-
-(defun nndiscourse--score-unread (group)
-  "Filter unread messages for GROUP now.
-
-Otherwise *Group* buffer annoyingly overrepresents unread."
-  (nndiscourse--with-group group
-    (let ((extant (get-buffer (gnus-summary-buffer-name gnus-newsgroup-name))))
-      (unless extant
-        (nndiscourse--rescore gnus-newsgroup-name t)))))
-
-(defun nndiscourse--mark-scored-as-read (group)
-  "If a root article (story) is scored in GROUP, that means we've already read it."
-  (nndiscourse--with-group group
-    (let ((preface (format "nndiscourse--mark-scored-as-read: %s not rescoring " group))
-          (extant (get-buffer (gnus-summary-buffer-name gnus-newsgroup-name)))
-          (unread (gnus-group-unread gnus-newsgroup-name)))
-      (cond ((or (not (numberp unread)) (<= unread 0))
-             (gnus-message 7 (concat preface "(unread %s)") unread))
-            ((and extant (buffer-local-value 'gnus-newsgroup-prepared extant))
-             ;; reflect the extant logic in `gnus-summary-setup-buffer'
-             (gnus-message 7 (concat preface "(extant %s)") (buffer-name extant)))
-            (t
-             (save-excursion
-               (let ((gnus-auto-select-subject nil))
-                 (gnus-summary-read-group gnus-newsgroup-name nil t)
-                 (dolist (datum gnus-newsgroup-data)
-                   (-when-let* ((article (gnus-data-number datum))
-                                (plst (nndiscourse--get-header article))
-                                (scored-story-p (and (plist-get plst :title)
-                                                     (> (gnus-summary-article-score article) 0))))
-                     (gnus-message 7 "nndiscourse--mark-scored-as-read: %s (%s %s)"
-                                   (plist-get plst :title) group article)
-                     (gnus-summary-mark-as-read article)))
-                 (nndiscourse--summary-exit))))))))
-
-(deffoo nndiscourse-request-group-scan (group &optional server info)
+(deffoo nndiscourse-request-group-scan (group &optional _server info)
   "M-g from *Group* calls this."
-  (nndiscourse--normalize-server)
   (nndiscourse--with-group group
     (gnus-message 5 "nndiscourse-request-group-scan: scanning %s..." group)
     (gnus-activate-group gnus-newsgroup-name t)
     (gnus-get-unread-articles-in-group
      (or info (gnus-get-info gnus-newsgroup-name))
      (gnus-active (gnus-info-group info)))
-    (gnus-message 5 "nndiscourse-request-group-scan: scanning %s...done" group)
-    (nndiscourse--score-unread group))
+    (gnus-message 5 "nndiscourse-request-group-scan: scanning %s...done" group))
   t)
 
 ;; gnus-group-select-group
@@ -625,12 +499,10 @@ Otherwise *Group* buffer annoyingly overrepresents unread."
 ;;         gnus-select-newsgroup
 ;;           gnus-request-group
 ;;             nndiscourse-request-group
-(deffoo nndiscourse-request-group (group &optional server _fast info)
-  (nndiscourse--normalize-server)
+(deffoo nndiscourse-request-group (group &optional _server _fast info)
   (nndiscourse--with-group group
     (let* ((info (or info (gnus-get-info gnus-newsgroup-name)))
-           (headers (nndiscourse-get-headers group))
-           (num-headers (length headers))
+           (num-headers (length (nndiscourse-get-headers group)))
            (status (format "211 %d %d %d %s" num-headers 1 num-headers group)))
       (gnus-message 7 "nndiscourse-request-group: %s" status)
       (nnheader-insert "%s\n" status)
@@ -642,205 +514,20 @@ Otherwise *Group* buffer annoyingly overrepresents unread."
         (gnus-set-info gnus-newsgroup-name info)))
     t))
 
-(cl-defun nndiscourse--request (caller url
-                                 &rest attributes &key parser (backend 'url-retrieve)
-                                 &allow-other-keys)
-  "Prefix errors with CALLER when executing synchronous request to URL."
-  (unless parser
-    (setq attributes (append attributes (list :parser #'buffer-string))))
-  (setq attributes
-        (cl-loop for (k v) on attributes by (function cddr)
-                 unless (eq k :backend)
-                 collect k and collect v))
-  (let ((request-backend backend))
-    (apply #'request url
-           :sync t
-           :error (apply-partially #'nndiscourse--request-error caller)
-           attributes)))
-
-(cl-defun nndiscourse--request-vote-success (item vote &key data &allow-other-keys)
-  "If necessary, login first, then locate vote link depending on VOTE sign."
-  (let* ((dom (nndiscourse--domify data))
-         (before (format "%s_%s" (if (> vote 0) "up" "un") item))
-         (after (format "%s_%s" (if (<= vote 0) "up" "un") item))
-         before-found result)
-    (-tree-map-nodes
-     (lambda (x)
-       (and (listp x)
-            (eq (car x) 'a)
-            (let ((id (alist-get 'id (cl-second x))))
-              (or (string= before id) (string= after id)))))
-     (lambda (x)
-       (let ((id (alist-get 'id (cl-second x)))
-             (href (alist-get 'href (cl-second x))))
-         (cond ((string= before id)
-                (setq before-found (concat (file-name-as-directory nndiscourse-hacker-news-url) href)))
-               ((string= after id) (setq result t)))))
-     dom)
-    (when before-found
-      (nndiscourse--request
-       "nndiscourse--request-vote-success"
-       before-found
-       :backend 'curl
-       :success (nndiscourse--callback
-                 result
-                 (cl-function
-                  (lambda (&key data response &allow-other-keys)
-                    (let* ((dom (nndiscourse--domify data))
-                           (form (alist-get 'form (alist-get 'body dom)))
-                           (url (request-response-url response))
-                           hidden)
-                      (nndiscourse--extract-hidden dom hidden)
-                      (when (string= "vote" (alist-get 'action (car form)))
-                        (setq dom (nndiscourse--domify
-                                   (nndiscourse--request-login url hidden))))
-                      (let (result0)
-                        (-tree-map-nodes
-                         (lambda (x)
-                           (and (listp x)
-                                (eq (car x) 'a)
-                                (string= after (alist-get 'id (cl-second x)))))
-                         (lambda (_x) (setq result0 t))
-                         dom)
-                        result0)))))))
-    result))
-
 (defun nndiscourse--request-vote (item vote)
   "Tally for ITEM the VOTE."
-  (let (result)
-    (nndiscourse--request
-     "nndiscourse--request-vote"
-     (format "%s/item?id=%s" nndiscourse-hacker-news-url item)
-     :backend 'curl
-     :success (nndiscourse--callback
-               result
-               (apply-partially #'nndiscourse--request-vote-success item vote)))
-    result))
+  (if (> vote 0)
+      (nndiscourse-rpc-request "" "create_post_action"
+                               :id (plist-get item :id)
+                               :post_action_type_id 2)
+    (nndiscourse-rpc-request "" "destroy_post_action"
+                             :id (plist-get item :id)
+                             :post_action_type_id 2)))
 
-(defsubst nndiscourse--enforce-curl ()
-  "Curl must exist."
-  (unless (executable-find "curl")
-    (error "nndiscourse--enforce-curl: the 'curl' program was not found")))
-
-(defun nndiscourse--request-reply (url text hidden)
-  "Reply URL with TEXT using HIDDEN credentials."
-  (nndiscourse--enforce-curl)
-  (let (result)
-    (nndiscourse--request
-     "nndiscourse--request-reply"
-     url
-     :backend 'curl
-     :data (append (cl-loop for (k v) on hidden by (function cddr)
-                            collect (cons (cl-subseq (symbol-name k) 1) v))
-                   `(("text" . ,text)))
-     :success (nndiscourse--callback result))
-    result))
-
-(defun nndiscourse--request-edit (_item _body)
-  "Replace body of ITEM with BODY."
-  (let (result)
-    ;; (nndiscourse--request
-    ;;  "nndiscourse--request-edit"
-    ;;  (format "%s/delete-confirm?%s"
-    ;;          nndiscourse-hacker-news-url
-    ;;          (url-build-query-string
-    ;;           (cons `(id ,item)
-    ;;                 (when root `((goto ,(format "item?id=%s" root)))))))
-    ;;  :backend 'curl
-    ;;  :success (nndiscourse--callback result #'nndiscourse--request-delete-success))
-    result))
-
-(defun nndiscourse--request-delete (item &optional root)
-  "Cancel ITEM at root ROOT."
-  (let (result)
-    (nndiscourse--request
-     "nndiscourse--request-delete"
-     (format "%s/delete-confirm?%s"
-             nndiscourse-hacker-news-url
-             (url-build-query-string
-              (cons `(id ,item)
-                    (when root `((goto ,(format "item?id=%s" root)))))))
-     :backend 'curl
-     :success (nndiscourse--callback result #'nndiscourse--request-delete-success))
-    result))
-
-(cl-defun nndiscourse--request-error (caller
-                                       &key response symbol-status error-thrown
-                                       &allow-other-keys
-                                       &aux (response-status
-                                             (request-response-status-code response)))
-  "Refer to CALLER when reporting a submit error."
-  (gnus-message 3 "%s %s: http status %s, %s" caller symbol-status response-status
-                (error-message-string error-thrown)))
-
-(cl-defun nndiscourse--request-submit-success
-    (caller posturl postdata retry &key data response &allow-other-keys)
-  "If necessary, login, then \"goto\" fields take us to target.
-
-And if accused of being a bot, retry with CALLER, POSTURL, POSTDATA (and toggle RETRY)."
-  (let* ((dom (nndiscourse--domify data))
-         (form (car (alist-get 'form (alist-get 'body dom))))
-         (url (request-response-url response))
-         (path (car (url-path-and-query (url-generic-parse-url url))))
-         (login-p (aif (alist-get 'action form) (cl-search it path)))
-         (result data))
-    (when login-p
-      (let (hidden)
-        (nndiscourse--extract-hidden dom hidden)
-        (setq result (nndiscourse--request-login url hidden))))
-    (-tree-map-nodes
-     (lambda (x)
-       (and (listp x)
-            (eq (car x) 'td)
-            (stringp (cl-third x))
-            (string-match-p (regexp-quote "try again") (cl-third x))))
-     (lambda (_x)
-       (if retry
-           (let (hidden)
-             (nndiscourse--extract-hidden dom hidden)
-             (setq result (nndiscourse--request-submit caller posturl postdata hidden nil)))
-         (setq result nil)
-         (setq nndiscourse-status-string "Retried and failed")))
-     dom)
-    result))
-
-(defun nndiscourse--request-submit (caller posturl postdata hidden retry)
-  "Submit from CALLER to POSTURL the POSTDATA with HIDDEN credentials.
-
-Bool RETRY is non-nil on first attempt.
-Factor out commonality between text and link submit."
-  (nndiscourse--enforce-curl)
-  (let (result)
-    (nndiscourse--request
-     caller
-     posturl
-     :backend 'curl
-     :data (append (cl-loop for (k v) on hidden by (function cddr)
-                            collect (cons (cl-subseq (symbol-name k) 1) v))
-                   postdata)
-     :success (nndiscourse--callback
-               result
-               (apply-partially #'nndiscourse--request-submit-success
-                                caller posturl postdata retry)))
-    result))
-
-(defsubst nndiscourse--request-submit-link (url title link hidden)
-  "Submit to URL the TITLE with LINK and HIDDEN credentials."
-  (nndiscourse--request-submit "nndiscourse--request-submit-link"
-                                url
-                                `(("title" . ,title) ("url" . ,link) ("text" . ""))
-                                hidden t))
-
-(defsubst nndiscourse--request-submit-text (url title text hidden)
-  "Submit to URL the TITLE with TEXT and HIDDEN credentials."
-  (nndiscourse--request-submit "nndiscourse--request-submit-text"
-                                url
-                                `(("title" . ,title) ("url" . "") ("text" . ,text))
-                                hidden t))
-
-(defun nndiscourse--request-item (id)
-  "Retrieve ID as a property list."
-  (let ((rpc (json-rpc-connect nndiscourse-localhost nndiscourse-port))
+(defun nndiscourse--request-item (id server)
+  "Retrieve ID from SERVER as a property list."
+  (push id nndiscourse--debug-request-posts)
+  (let ((conn (json-rpc-connect nndiscourse-localhost (nndiscourse--get-port server)))
         (utf-decoder (lambda (x)
                        (decode-coding-string (with-temp-buffer
                                                (set-buffer-multibyte nil)
@@ -848,98 +535,89 @@ Factor out commonality between text and link submit."
                                                (buffer-string))
                                              'utf-8))))
     (add-function :filter-return (symbol-function 'json-read-string) utf-decoder)
-    (condition-case err
-        (prog1 (json-rpc rpc "get_post" id)
-          (remove-function (symbol-function 'json-read-string) utf-decoder))
-      (error (gnus-message 3 "nndiscourse--request-item: %s" (error-message-string err))
-             (remove-function (symbol-function 'json-read-string) utf-decoder)
-             nil))))
+    (unwind-protect
+        (condition-case err  (json-rpc conn "get_post" id)
+          (error (gnus-message 3 "nndiscourse--request-item: %s" (error-message-string err))
+                 nil))
+      (remove-function (symbol-function 'json-read-string) utf-decoder))))
 
-(defun nndiscourse--select-items (start-item max-id all-stories)
-  "Return a list of items to retrieve between START-ITEM and MAX-ID.
+(defun nndiscourse-get-categories (server)
+  "Query SERVER /categories.json."
+  (seq-filter (lambda (x) (eq json-false (plist-get x :read_restricted)))
+              (funcall #'nndiscourse-rpc-request server "categories")))
 
-Since we are constrained by `nndiscourse-max-ids-per-scan', we prioritize
-ALL-STORIES and may throw away comments, etc."
-  (mapcar
-   #'number-to-string
-   (if (> (1+ (- max-id start-item)) nndiscourse-max-ids-per-scan)
-       (let* ((stories (seq-take-while (lambda (x) (>= x start-item))
-                                       all-stories))
-              (excess (- nndiscourse-max-ids-per-scan (length stories))))
-         (if (<= excess 0)
-             (nreverse (cl-subseq stories 0 nndiscourse-max-ids-per-scan))
-           (cl-loop with excess-count = 0
-                    with j = 0
-                    for i from max-id downto start-item by 1
-                    until (or (>= excess-count excess) (>= j (length stories)))
-                    if (= i (elt stories j))
-                    do (cl-incf j)
-                    else
-                    do (cl-incf excess-count)
-                    end
-                    collect i into result
-                    finally return (nreverse (append result (nthcdr j stories)
-                                                     (cl-loop for k from 0 below
-                                                              (- excess excess-count) by 1
-                                                              collect (- i k)))))))
-     (cl-loop for i from start-item to max-id by 1
-              collect i))))
+(cl-defun nndiscourse-get-topics (server slug &key (page 0))
+  "Query SERVER /c/SLUG/l/latest.json."
+  (funcall #'nndiscourse-rpc-request server
+           "category_latest_topics"
+           :category_slug slug :page page))
 
-(defun nndiscourse--incoming (&optional static-max-id static-newstories)
-  "Drink from the firehose.
+(cl-defun nndiscourse-get-posts (server &key (before 0))
+  "Query SERVER /posts.json."
+  (plist-get (funcall #'nndiscourse-rpc-request server "posts" :before before) :latest_posts))
 
-Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
+(defun nndiscourse--number-to-header (category-id topic-id post-number)
+  "O(n) search for CATEGORY-ID TOPIC-ID POST-NUMBER in headers."
+  (-when-let* ((group (nndiscourse--gethash category-id nndiscourse-categories-hashtb))
+               (headers (nndiscourse-get-headers group))
+               (found (seq-position
+                       headers (cons topic-id post-number)
+                       (lambda (plst loc)
+                         (cl-destructuring-bind (topic-id* post-number*) loc
+                           (and (= topic-id* (plist-get plst :topic_id))
+                                (= post-number* (plist-get plst :post_number))))))))
+    (nndiscourse--get-header (1+ found) group)))
+
+(defsubst nndiscourse--append-header (plst group)
+  "Update hash tables for PLST \"header\" in GROUP."
+  (let ((id (plist-get plst :id))
+        (headers (nndiscourse-get-headers group)))
+    (nndiscourse--sethash id (cons group (length headers)) nndiscourse-location-hashtb)
+    (nndiscourse--sethash group (nconc headers (list plst)) nndiscourse-headers-hashtb)
+    plst))
+
+(defun nndiscourse--incoming ()
+  "Drink from the firehose."
   (interactive)
-  (setq nndiscourse--debug-request-items nil)
-  (unless nndiscourse--last-id
-    (mapc (lambda (group)
-            (-when-let* ((full-name (gnus-group-full-name group "nndiscourse:"))
-                         (info (gnus-get-info full-name)))
-              (gnus-info-set-read info nil)
-              (gnus-set-info full-name info)))
-          `(,nndiscourse--group-ask
-            ,nndiscourse--group-show
-            ,nndiscourse--group-job
-            ,nndiscourse--group-stories)))
-  (when-let ((max-id (or static-max-id (nndiscourse--request-max-id))))
-    (let* ((stories (or static-newstories (nndiscourse--request-newstories)))
-           (earliest-story (nth (1- (min nndiscourse-max-ids-per-scan
-                                         (length stories)))
-                                stories))
-           (start-item (if nndiscourse--last-id
-                           (1+ nndiscourse--last-id)
-                         (min earliest-story
-                              (- max-id nndiscourse-max-ids-per-scan))))
-           (counts (gnus-make-hashtable))
-           (items (nndiscourse--select-items start-item max-id stories)))
-      (dolist (item items)
-        (-when-let* ((plst (nndiscourse--request-item item))
-                     (not-deleted (not (plist-get plst :deleted)))
-                     (type (plist-get plst :type)))
-          (nndiscourse-add-entry nndiscourse-refs-hashtb plst :parent)
-          (nndiscourse-add-entry nndiscourse-authors-hashtb plst :by)
-          (nndiscourse--replace-hash type (lambda (x) (1+ (or x 0))) counts)
-          (setq plst (plist-put plst :link_title
-                                (or (plist-get
-                                     (nndiscourse--retrieve-root plst)
-                                     :title) "")))
-          (cl-case (intern type)
-            (job (nndiscourse--append-header plst nndiscourse--group-job))
-            ((story comment) (nndiscourse--append-header plst))
-            (otherwise (gnus-message 5 "nndiscourse-incoming: ignoring type %s" type)))))
-      (setq nndiscourse--last-id max-id)
-      (gnus-message
-       5 (concat "nndiscourse--incoming: "
-                 (format "%d requests, " (length nndiscourse--debug-request-items))
-                 (let ((result ""))
-                   (nndiscourse--maphash
-                    (lambda (key value)
-                      (setq result (concat result (format "%s +%s " value key))))
-                    counts)
-                   result))))))
+  (setq nndiscourse--debug-request-posts nil)
+  (cl-loop
+   with counts = (gnus-make-hashtable)
+   for page-bottom = 0 then (plist-get (elt posts (1- (length posts))) :id)
+   for posts = (nndiscourse-get-posts "" :before page-bottom)
+   do (seq-map
+       (lambda (plst)
+         (when-let ((not-deleted (not (plist-get plst :deleted_at)))
+                    (type (plist-get plst :post_type)))
+           (when-let ((parent-number (plist-get plst :reply_to_post_number)))
+             (nndiscourse--sethash
+               (plist-get plst :id)
+               (plist-get (nndiscourse--number-to-header
+                           (plist-get plst :category_id)
+                           (plist-get plst :topic_id)
+                           parent-number)
+                          :id)
+               nndiscourse-refs-hashtb))
+           (nndiscourse-add-entry nndiscourse-authors-hashtb plst :username)
+           (nndiscourse--replace-hash type (lambda (x) (1+ (or x 0))) counts)
+           (nndiscourse--append-header plst (nndiscourse--gethash
+                                              (plist-get plst :category_id)
+                                              nndiscourse-categories-hashtb))))
+       posts)
+   until (or (not nndiscourse--last-id) (member nndiscourse--last-id posts))
+   finally do
+   (progn
+     (setq nndiscourse--last-id (plist-get (elt posts 0) :id))
+     (gnus-message
+      5 (concat "nndiscourse--incoming: "
+                (format "%d requests, " (length nndiscourse--debug-request-posts))
+                (let ((result ""))
+                  (nndiscourse--maphash
+                   (lambda (key value)
+                     (setq result (concat result (format "%s +%s " value key))))
+                   counts)
+                  result))))))
 
-(deffoo nndiscourse-request-scan (&optional group server)
-  (nndiscourse--normalize-server)
+(deffoo nndiscourse-request-scan (&optional group _server)
   (when group
     (if (> 2 (- (truncate (float-time)) nndiscourse--last-scan-time))
         (gnus-message 7 "nndiscourse-request-scan: last scanned at %s"
@@ -954,47 +632,51 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
 
 (defsubst nndiscourse--make-message-id (id)
   "Construct a valid Gnus message id from ID."
-  (format "<%s@ycombinator.com>" id))
+  (format "<%s@discourse.org>" id))
 
 (defsubst nndiscourse--make-references (id)
   "Construct a space delimited string of message ancestors of ID."
   (mapconcat (lambda (ref) (nndiscourse--make-message-id ref))
              (nndiscourse-refs-for id) " "))
 
-(defsubst nndiscourse--make-header (article-number &optional group)
+(defsubst nndiscourse--make-header (article-number group)
   "Construct full headers of articled indexed ARTICLE-NUMBER in GROUP."
   (let* ((header (nndiscourse--get-header article-number group))
          (score (plist-get header :score))
-         (num-comments (plist-get header :num_comments)))
+         (reads (plist-get header :reads))
+         (server-name-qua-url (cl-second (gnus-group-name-to-method group))))
     (make-full-mail-header
      article-number
-     (replace-regexp-in-string "\\S-+ HN: " ""
-                               (or (plist-get header :title)
-                                   (plist-get header :link_title)))
-     (plist-get header :by)
-     (format-time-string "%a, %d %h %Y %T %z (%Z)" (plist-get header :time))
+     (plist-get header :topic_title)
+     (plist-get header :username)
+     (format-time-string "%a, %d %h %Y %T %z (%Z)" (plist-get header :created_at))
      (nndiscourse--make-message-id (plist-get header :id))
      (nndiscourse--make-references (plist-get header :id))
      0 0 nil
-     (append `((X-Discourse-Name . ,(plist-get header :id)))
+     (append `((X-Discourse-Name . ,(plist-get header :name)))
              `((X-Discourse-ID . ,(plist-get header :id)))
-             `((X-Discourse-Permalink . ,(format "%s/item?id=%s" nndiscourse-hacker-news-url (plist-get header :id))))
+             `((X-Discourse-Permalink . ,(format "%s/t/%s/%s/%s"
+                                                 server-name-qua-url
+                                                 (plist-get header :topic_slug)
+                                                 (plist-get header :topic_id)
+                                                 (plist-get header :id))))
              (and (integerp score)
                   `((X-Discourse-Score . ,(number-to-string score))))
-             (and (integerp num-comments)
-                  `((X-Discourse-Comments . ,(number-to-string num-comments))))))))
+             (and (integerp reads)
+                  `((X-Discourse-Reads . ,(number-to-string reads))))))))
 
-(deffoo nndiscourse-request-article (article-number &optional group server buffer)
-  (nndiscourse--normalize-server)
+(defalias 'nndiscourse--request #'ignore)
+
+(deffoo nndiscourse-request-article (article-number &optional group _server buffer)
   (unless buffer (setq buffer nntp-server-buffer))
   (nndiscourse--with-group group
     (with-current-buffer buffer
       (erase-buffer)
       (let* ((header (nndiscourse--get-header article-number group))
-             (mail-header (nndiscourse--make-header article-number))
+             (mail-header (nndiscourse--make-header article-number group))
              (score (cdr (assq 'X-Discourse-Score (mail-header-extra mail-header))))
              (permalink (cdr (assq 'X-Discourse-Permalink (mail-header-extra mail-header))))
-             (body (nndiscourse--massage (nndiscourse--get-body header server))))
+             (body (nndiscourse--massage (nndiscourse--get-body header))))
         (when body
           (insert
            "Newsgroups: " group "\n"
@@ -1012,10 +694,9 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
                (parent-author
                 (or (nndiscourse--gethash parent nndiscourse-authors-hashtb)
                     "Someone"))
-               (parent-body (nndiscourse--get-body
-                             (nndiscourse-find-header parent) server)))
+               (parent-body (nndiscourse--get-body (nndiscourse-find-header parent))))
             (insert (nndiscourse--citation-wrap parent-author parent-body)))
-          (aif (and nndiscourse-render-story (plist-get header :url))
+          (aif (and nndiscourse-render-post (plist-get header :url))
               (condition-case err
                   (nndiscourse--request "nndiscourse-request-article" it
                                          :success (cl-function
@@ -1027,8 +708,7 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
             (insert body))
           (cons group article-number))))))
 
-(deffoo nndiscourse-retrieve-headers (article-numbers &optional group server _fetch-old)
-  (nndiscourse--normalize-server)
+(deffoo nndiscourse-retrieve-headers (article-numbers &optional group _server _fetch-old)
   (nndiscourse--with-group group
     (with-current-buffer nntp-server-buffer
       (erase-buffer)
@@ -1036,24 +716,19 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
         (nnheader-insert-nov (nndiscourse--make-header i group)))
       'nov)))
 
-(deffoo nndiscourse-close-server (&optional server)
-  (nndiscourse--normalize-server)
-  t)
-
 (deffoo nndiscourse-request-list (&optional server)
-  (nndiscourse--normalize-server)
   (with-current-buffer nntp-server-buffer
     (erase-buffer)
-    (mapc (lambda (group)
-            (let ((full-name (gnus-group-full-name group `("nndiscourse" ,(or server "")))))
+    (mapc (lambda (plst)
+            (let* ((id (plist-get plst :id))
+                   (group (plist-get plst :slug))
+                   (full-name (gnus-group-full-name group `("nndiscourse" ,(or server "")))))
               (gnus-activate-group full-name t)
-              (gnus-group-unsubscribe-group full-name gnus-level-default-subscribed t))
-            (insert (format "%s %d 1 y\n" group
-                            (length (nndiscourse-get-headers group)))))
-          `(,nndiscourse--group-ask
-            ,nndiscourse--group-show
-            ,nndiscourse--group-job
-            ,nndiscourse--group-stories)))
+              (gnus-group-unsubscribe-group full-name gnus-level-default-subscribed t)
+              (nndiscourse--sethash id group nndiscourse-categories-hashtb)
+              (insert (format "%s %d 1 y\n" group
+                              (length (nndiscourse-get-headers group))))))
+          (nndiscourse-get-categories "")))
   t)
 
 (defun nndiscourse-sentinel (process event)
@@ -1072,138 +747,21 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
     (when (string-prefix-p magic string)
       (message "%s: %s" server (substring string (length magic))))))
 
-(cl-defun nndiscourse--request-delete-success (&key data &allow-other-keys)
-  "Delete with extreme prejudice."
-  (let* ((dom (nndiscourse--domify data))
-         hidden)
-    (nndiscourse--extract-hidden dom hidden)
-    (let (result)
-      (nndiscourse--request
-       "nndiscourse--request-delete-success"
-       (format "%s/xdelete" nndiscourse-hacker-news-url)
-       :backend 'curl
-       :data (append (cl-loop for (k v) on hidden by (function cddr)
-                              collect (cons (cl-subseq (symbol-name k) 1) v))
-                     '(("d" . "Yes")))
-       :success (nndiscourse--callback result))
-      result)))
-
-(defsubst nndiscourse--extract-unique (message-id)
-  "Get unique from <unique@fqdn> in MESSAGE-ID."
-  (when (string-match "\\(<[^>]+>\\)" message-id)
-    (car (split-string
-          (replace-regexp-in-string
-           "[<>]" "" (match-string 1 message-id)) "@"))))
-
-(defsubst nndiscourse--request-post-reply-url (headers)
-  "Return hexified reply url from HEADERS."
-  (let ((references (mail-header-references headers))
-        (immediate (nndiscourse--extract-unique
-                    (mail-header-message-id headers))))
-    (if references
-        (let ((root (nndiscourse--extract-unique
-                     (car (split-string references " ")))))
-          (format "%s/reply?%s"
-                  nndiscourse-hacker-news-url
-                  (url-build-query-string
-                   `((id ,immediate) (goto ,(format "item?id=%s#%s"
-                                                    root
-                                                    immediate))))))
-      (format "%s/comment?%s"
-              nndiscourse-hacker-news-url
-              (url-build-query-string
-                   `((id ,immediate) (goto ,(format "item?id=%s"
-                                                    immediate))))))))
-
-(defmacro nndiscourse--set-status-string (dom)
-  "Set `nndiscourse-status-string' to DOM remarks for benefit of `nnheader-report'."
-  `(let ((body (alist-get 'body ,dom))
-         remarks)
-     (-tree-map-nodes
-      (lambda (x)
-        (and (listp x)
-             (eq (car x) 'td)
-             (stringp (cl-third x))))
-      (lambda (x) (!cons (cl-third x) remarks))
-      body)
-     (setq nndiscourse-status-string
-           (mapconcat #'string-trim remarks " "))))
-
 ;; C-c C-c from followup buffer
 ;; message-send-and-exit
 ;; message-send
 ;; message-send-method-alist=message-send-news-function=message-send-news
 ;; gnus-request-post
 ;; nndiscourse-request-post
-(deffoo nndiscourse-request-post (&optional server)
-  (nndiscourse--normalize-server)
-  (-when-let* ((url (aif message-reply-headers
-                        (nndiscourse--request-post-reply-url it)
-                      (format "%s/submit" nndiscourse-hacker-news-url)))
-               (hidden (nndiscourse--request-hidden url)))
-    (let ((ret t)
-          (title (or (message-fetch-field "Subject") (error "No Subject field")))
-          (link (message-fetch-field "Link"))
-          (reply-p (not (null message-reply-headers)))
-          (edit-item (aif (message-fetch-field "Supersedes")
-                         (nndiscourse--extract-unique it)))
-          (cancel-item (aif (message-fetch-field "Control")
-                           (nndiscourse--extract-unique it)))
-          (body
-           (save-excursion
-             (save-restriction
-               (message-goto-body)
-               (narrow-to-region (point) (point-max))
-               (buffer-string)))))
-      (cond (cancel-item
-             (let* ((header (nndiscourse-find-header cancel-item))
-                    (result (nndiscourse--request-delete
-                             cancel-item
-                             (and (null (plist-get header :title))
-                                  (plist-get (nndiscourse--retrieve-root header) :id))))
-                    (dom (nndiscourse--domify result)))
-               (cl-destructuring-bind (tag params &rest args) dom
-                 (setq ret (and (eq tag 'html)
-                                (string= (alist-get 'op params) "item")))
-                 (unless ret (nndiscourse--set-status-string dom)))))
-            (edit-item
-             (let* ((result (nndiscourse--request-edit edit-item body))
-                    (dom (nndiscourse--domify result)))
-               (cl-destructuring-bind (tag params &rest args) dom
-                 (setq ret (and (eq tag 'html)
-                                (string= (alist-get 'op params) "item")))
-                 (unless ret (nndiscourse--set-status-string dom)))))
-            (reply-p
-             (let* ((path (car (url-path-and-query (url-generic-parse-url url))))
-                    (url (replace-regexp-in-string path "/comment" url))
-                    (result (nndiscourse--request-reply url body hidden))
-                    (dom (nndiscourse--domify result)))
-               (cl-destructuring-bind (tag params &rest args) dom
-                 (setq ret (and (eq tag 'html)
-                                (string= (alist-get 'op params) "item")))
-                 (unless ret (nndiscourse--set-status-string dom)))))
-            (link
-             (let* ((parsed-url (url-generic-parse-url link))
-                    (host (url-host parsed-url))
-                    (path (car (url-path-and-query (url-generic-parse-url url))))
-                    (url (replace-regexp-in-string path "/r" url)))
-               (if (and (stringp host) (not (zerop (length host))))
-                   (setq ret (nndiscourse--request-submit-link url title link hidden))
-                 (gnus-message 3 "nndiscourse-request-post: invalid url \"%s\"" link)
-                 (setq ret nil))))
-            (t
-             (let* ((path (car (url-path-and-query (url-generic-parse-url url))))
-                    (url (replace-regexp-in-string path "/r" url)))
-               (setq ret (nndiscourse--request-submit-text url title body hidden)))))
-      ret)))
+(deffoo nndiscourse-request-post (&optional _server)
+  nil)
 
-(defun nndiscourse--browse-story (&rest _args)
+(defun nndiscourse--browse-post (&rest _args)
   "What happens when I click on discourse Subject."
   (-when-let* ((group-article gnus-article-current)
-               (url (plist-get (nndiscourse--retrieve-root
-                                (nndiscourse--get-header
-                                 (cdr group-article)
-                                 (gnus-group-real-name (car group-article))))
+               (url (plist-get (nndiscourse--get-header
+                                (cdr group-article)
+                                (gnus-group-real-name (car group-article)))
                            :url)))
     (browse-url url)))
 
@@ -1217,12 +775,12 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
     (setq result (cl-delete references-key result :test (lambda (x y) (cl-search x (car y)))))
     (push (append '("^\\(Message-I[Dd]\\|^In-Reply-To\\):") references-value) result)
     (push '("^Subject:" ": *\\(.+\\)$" 1 (>= gnus-button-browse-level 0)
-            nndiscourse--browse-story 1)
+            nndiscourse--browse-post 1)
           result)
     result))
 
 (defsubst nndiscourse--fallback-link ()
-  "Cannot render story."
+  "Cannot render post."
   (let* ((header (nndiscourse--get-header
                   (cdr gnus-article-current)
                   (gnus-group-real-name (car gnus-article-current))))
@@ -1237,7 +795,7 @@ Optionally provide STATIC-MAX-ID and STATIC-NEWSTORIES to prevent querying out."
     (condition-case err
         (gnus-article-prepare article all-headers)
       (error
-       (if nndiscourse-render-story
+       (if nndiscourse-render-post
            (progn
              (gnus-message 7 "nndiscourse--display-article: '%s' (falling back...)"
                            (error-message-string err))
@@ -1309,7 +867,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
 (fset 'gnus-user-format-function-S
       (symbol-function 'nndiscourse--format-time-elapsed))
 
-
 (let ((custom-defaults
        ;; For now, revert any user overrides that I can't predict.
        (mapcar (lambda (x)
@@ -1331,11 +888,7 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                                   (gnus-cite-hide-absolute 5)
                                   (gnus-cite-hide-percentage 0)
                                   (gnus-cited-lines-visible '(2 . 2))
-                                  (gnus-use-cache nil)
-                                  (gnus-use-adaptive-scoring (quote (line)))
-                                  (gnus-newsgroup-adaptive t)
                                   (gnus-simplify-subject-functions (quote (gnus-simplify-subject-fuzzy)))
-
                                   (gnus-summary-line-format "%3t%U%R%uS %I%(%*%-10,10f  %s%)\n")
                                   (gnus-auto-extend-newsgroup nil)
                                   (gnus-add-timestamp-to-message t)
@@ -1344,8 +897,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                                   (gnus-header-button-alist
                                    (quote ,(nndiscourse--header-button-alist)))
                                   (gnus-visible-headers ,(concat gnus-visible-headers "\\|^Score:")))))
-
-(nnoo-define-skeleton nndiscourse)
 
 (defun nndiscourse-article-mode-activate ()
   "Augment the `gnus-article-mode-map' conditionally."
@@ -1357,29 +908,11 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
   (when (nndiscourse--gate)
     (nndiscourse-summary-mode)))
 
+(nnoo-define-skeleton nndiscourse)
+
 ;; I believe I did try buffer-localizing hooks, and it wasn't sufficient
 (add-hook 'gnus-article-mode-hook 'nndiscourse-article-mode-activate)
 (add-hook 'gnus-summary-mode-hook 'nndiscourse-summary-mode-activate)
-
-;; Avoid having to select the GROUP to make the unread number go down.
-(mapc (lambda (hook)
-        (add-hook hook
-                  (lambda () (mapc (lambda (group)
-                                     (nndiscourse--score-unread group))
-                                   `(,nndiscourse--group-ask
-                                     ,nndiscourse--group-show
-                                     ,nndiscourse--group-job
-                                     ,nndiscourse--group-stories)))))
-      '(gnus-started-hook gnus-after-getting-new-news-hook))
-
-(add-hook 'gnus-started-hook
-          (lambda () (mapc (lambda (group)
-                             (nndiscourse--mark-scored-as-read group))
-                           `(,nndiscourse--group-ask
-                             ,nndiscourse--group-show
-                             ,nndiscourse--group-job
-                             ,nndiscourse--group-stories)))
-          t)
 
 ;; "Can't figure out hook that can remove itself (quine conundrum)"
 (add-function :around (symbol-function 'gnus-summary-exit)
@@ -1388,15 +921,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                        (if (nndiscourse--gate) nil
                          gnus-summary-next-group-on-exit)))
                   (apply f args))))
-(add-function :after (symbol-function 'gnus-summary-exit)
-              (symbol-function 'nndiscourse--score-pending))
-
-(add-function :before (symbol-function 'gnus-score-save)
-              (lambda (&rest _)
-                (when (nndiscourse--gate)
-                  (setq nndiscourse-score-files
-                        (assq-delete-all (intern gnus-newsgroup-name)
-                                         nndiscourse-score-files)))))
 
 ;; `gnus-newsgroup-p' requires valid method post-mail to return t
 (add-to-list 'gnus-valid-select-methods '("nndiscourse" post-mail) t)
@@ -1463,18 +987,22 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                      (error (error-message-string err))))))
          (t (apply f args)))))
 
+(defsubst nndiscourse--who-am-i ()
+  "Get my Discourse username."
+  "dickmao")
+
 (add-function
  :filter-return (symbol-function 'message-make-fqdn)
  (lambda (val)
    (if (and (nndiscourse--gate)
             (cl-search "--so-tickle-me" val))
-       "ycombinator.com" val)))
+       "discourse.org" val)))
 
 (add-function
  :before-until (symbol-function 'message-make-from)
  (lambda (&rest _args)
    (when (nndiscourse--gate)
-     (concat (nndiscourse--who-am-i) "@ycombinator.com"))))
+     (concat (nndiscourse--who-am-i) "@discourse.org"))))
 
 (add-function
  :around (symbol-function 'message-is-yours-p)
@@ -1482,7 +1010,7 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
    (let ((concat-func (lambda (f &rest args)
                        (let ((fetched (apply f args)))
                          (if (string= (car args) "from")
-                             (concat fetched "@ycombinator.com")
+                             (concat fetched "@discourse.org")
                            fetched)))))
      (when (nndiscourse--gate)
        (add-function :around
@@ -1494,43 +1022,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
        (error (remove-function (symbol-function 'message-fetch-field) concat-func)
               (error (error-message-string err)))))))
 
-(let ((protect (lambda (caller)
-                 (add-function
-                  :around (symbol-function caller)
-                  (lambda (f &rest args)
-                    (cond ((nndiscourse--gate)
-                           (condition-case err
-                               (apply f args)
-                             (error (gnus-message 7 "%s: %s"
-                                                  caller
-                                                  (error-message-string err)))))
-                          (t (apply f args))))))))
-  (funcall protect 'url-http-generic-filter)
-  (funcall protect 'url-http-end-of-document-sentinel))
-
-;; Make the scoring entries Markovian
-(add-function
- :around (symbol-function 'gnus-summary-score-entry)
- (lambda (f header match &rest args)
-   (cond ((nndiscourse--gate)
-          (let* ((new-touched
-                  (let ((gnus-score-alist (copy-alist '((touched nil)))))
-                    (cons (apply f header match args)
-                          (cl-some #'identity (gnus-score-get 'touched)))))
-                 (new (car new-touched))
-                 (touched (cdr new-touched)))
-            (when (and touched new)
-              (-if-let* ((old (gnus-score-get header))
-                         (elem (assoc match old))
-                         (match-type (eq (nth 3 elem) (nth 3 new)))
-                         (match-date (or (and (numberp (nth 2 elem)) (numberp (nth 2 new)))
-                                         (and (not (nth 2 elem)) (not (nth 2 new))))))
-                  (setcar (cdr elem) (nth 1 new))
-                (gnus-score-set header (cons new old) nil t))
-              (gnus-score-set 'touched '(t)))
-            new))
-         (t (apply f header match args)))))
-
 ;; the let'ing to nil of `gnus-summary-display-article-function'
 ;; in `gnus-summary-select-article' dates back to antiquity.
 (add-function
@@ -1541,28 +1032,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                  (symbol-function 'nndiscourse--display-article)))
             (apply f args)))
          (t (apply f args)))))
-
-;; disallow caching as firebase might change the article numbering?
-(setq gnus-uncacheable-groups
-      (aif gnus-uncacheable-groups
-          (format "\\(%s\\)\\|\\(^nndiscourse\\)" it)
-        "^nndiscourse"))
-
-(custom-set-variables
- '(gnus-score-after-write-file-function
-   (lambda (file)
-     (when (nndiscourse--gate)
-       (unless (member file (alist-get (intern gnus-newsgroup-name)
-                                       nndiscourse-score-files))
-         (push file (alist-get (intern gnus-newsgroup-name)
-                               nndiscourse-score-files)))))))
-
-;; (push '((and (eq (car gnus-current-select-method) 'nndiscourse)
-;;              (eq mark gnus-unread-mark)
-;;              (not (string-match-p
-;;                    "^Re: " (gnus-summary-article-subject))))
-;;         . gnus-summary-high-unread)
-;;       gnus-summary-highlight)
 
 (provide 'nndiscourse)
 

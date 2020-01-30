@@ -7,10 +7,11 @@
 (require 'json-rpc)
 (require 'shr)
 
+;; poor man's
 (let ((result))
   (request "localhost:8999"
     :type "POST"
-    :data (json-encode '(("method" . "sum") ("jsonrpc" . "2.0") ("params" . (1 2)) ("id" . 1)))
+    :data (json-encode '(("method" . "category_latest_topics") ("jsonrpc" . "2.0") ("params" :category_slug "emacs") ("id" . 1)))
     :sync t
     :parser 'json-read
     :success (cl-function
@@ -18,13 +19,56 @@
                 (setq result (cdr (assq 'result data))))))
   result)
 
-(let ((rpc (json-rpc-connect "localhost" 8999)))
-  (seq-map (-rpartial #'plist-get :created_at)
-           (plist-get (json-rpc rpc "posts" 2) :latest_posts)))
+;; rich man's
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :post_number)
+           (plist-get (nndiscourse-rpc-request "" "posts" :before 0) :latest_posts)))
 
-(let ((rpc (json-rpc-connect "localhost" 8999)))
-  (seq-map (-rpartial #'plist-get :created_at)
-           (plist-get (json-rpc rpc "posts" 2) :latest_posts)))
+(defun nnreddit-rpc-get (&optional server)
+  "Retrieve the PRAW process for SERVER."
+  (setq proc (make-process :name server
+                           :buffer (get-buffer-create (format " *%s*" server))
+                           :command praw-command
+                           :connection-type 'pipe
+                           :noquery t
+                           :sentinel #'nnreddit-sentinel
+                           :stderr (get-buffer-create (format " *%s-stderr*" server))))
+  proc)
+
+
+
+;; run thor on command line, and don't instantiate it in emacs
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (cl-letf (((symbol-function 'nndiscourse-rpc-get) (lambda (&rest args) t)))
+    ;; (nndiscourse-rpc-request "" "category_latest_topics" '(:category_slug . "emacs"))
+    (nndiscourse-rpc-request "" "category_latest_topics" :category_slug "emacs")))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :title) (nndiscourse-get-topics "" "emacs")))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :topic_title) (nndiscourse-get-posts "" :before 71000)))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (apply #'min (seq-map (-rpartial #'plist-get :id) (nndiscourse-get-posts ""))))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-filter (lambda (raw) (cl-search "org-mode" raw))
+              (seq-map (lambda (x) (plist-get x :raw)) (nndiscourse-get-posts ""))))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-filter (lambda (raw) (cl-search "word wrap" (cdr raw)))
+              (seq-map (lambda (x) (cons (plist-get x :raw) (plist-get x :topic_title)))
+                       (nndiscourse-get-posts ""))))
+
+(let ((nndiscourse-url "https://emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :slug) (nndiscourse-get-categories "")))
+
+
+(add-to-list 'gnus-secondary-select-methods '(nndiscourse ""))
+(gnus-server-to-method "nndiscourse:")
+(gnus-group-full-name "programming" "nndiscourse:")
+(gnus-get-info (gnus-group-full-name "programming" "nndiscourse:"))
 
 (let* ((rpc (json-rpc-connect "localhost" 8999))
        (cooked (plist-get (json-rpc rpc "get_post" 12) :cooked)))
@@ -195,3 +239,45 @@
                             t)
              (json-read)))))
     user-api-key))
+
+(let ((foo (gnus-make-hashtable)))
+  (nndiscourse--sethash 1 '(a b c (c . e)) foo))
+
+(let ((foo (gnus-make-hashtable)))
+  (nndiscourse--sethash "froo" '(a b c (c . e)) foo)
+  (let ((posts (nndiscourse--gethash "froo" foo))
+        (index 2))
+    (when (< (length posts) (1+ index))
+      (nndiscourse--sethash "froo"
+        (nconc posts (make-list (- (1+ index)
+                                   (length posts))
+                                nil))
+        foo))
+
+    (setf (elt (nndiscourse--gethash "froo" foo) index) "hi!")
+    (nndiscourse--gethash "froo" foo)))
+
+(let ((id (plist-get plst :id))
+      (group (plist-get plst :creation_id))
+      (topic-title (plist-get plst :topic_title))
+      (post_number (plist-get plst :post_number)))
+  (nndiscourse--sethash
+    id
+    (list group topic-title post_number)
+    nndiscourse-location-hashtb)
+  (nndiscourse--sethash
+    group
+    (let* ((posts-hashtb
+            (or (nndiscourse--gethash group nndiscourse-headers-hashtb)
+                (gnus-make-hashtable)))
+           (posts (nndiscourse--gethash topic-title posts-hashtb)))
+      (when (< (length posts) post-number)
+        (nndiscourse--sethash
+          topic-title
+          (nconc posts (make-list (- post-number (length posts)) nil))
+          posts-hashtb))
+      (setf (elt (nndiscourse--gethash topic-title posts-hashtb)
+                 post-number)
+            plst)
+      posts-hashtb)
+    nndiscourse-headers-hashtb))

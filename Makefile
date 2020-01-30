@@ -21,12 +21,15 @@ clean:
 	rm -f tests/log/*
 	rm -rf tests/test-install
 
+.PHONY: cask
+cask: $(CASK_DIR)
+
 $(CASK_DIR): Cask
 	$(CASK) install
 	touch $(CASK_DIR)
 
 .PHONY: test-compile
-test-compile: $(CASK_DIR) autoloads
+test-compile: cask autoloads
 	$(MAKE) -C nndiscourse $@
 	sh -e tools/package-lint.sh ./nndiscourse.el
 	! ($(CASK) eval "(let ((byte-compile-error-on-warn t)) (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):")

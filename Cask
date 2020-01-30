@@ -7,4 +7,5 @@
 (development
  (depends-on "ert-runner")
  (depends-on "package-lint")
+ (depends-on "json-rpc")
  (depends-on "ecukes"))

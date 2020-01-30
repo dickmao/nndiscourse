@@ -3,7 +3,7 @@ REPO := $(shell git rev-parse --show-toplevel)
 
 .PHONY: test-compile
 test-compile:
-	bundle install
+	bundle install --quiet
 	bundle exec rake
 
 .PHONY: clean
