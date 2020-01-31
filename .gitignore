@@ -5,3 +5,4 @@ nndiscourse-autoloads.el
 bin/
 vendor/
 nndiscourse*.gem
+dist/
