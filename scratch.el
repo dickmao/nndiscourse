@@ -20,7 +20,7 @@
   result)
 
 ;; rich man's
-(let ((nndiscourse-url "https://emacs-china.org"))
+(let ((server "emacs-china.org"))
   (seq-map (-rpartial #'plist-get :post_number)
            (plist-get (nndiscourse-rpc-request "" "posts" :before 0) :latest_posts)))
 
@@ -38,37 +38,36 @@
 
 
 ;; run thor on command line, and don't instantiate it in emacs
-(let ((nndiscourse-url "https://emacs-china.org"))
-  (cl-letf (((symbol-function 'nndiscourse-rpc-get) (lambda (&rest args) t)))
+(let ((server "emacs-china.org"))
+  (cl-letf (((symbol-function 'nndiscourse-open-server) (lambda (&rest args) t)))
     ;; (nndiscourse-rpc-request "" "category_latest_topics" '(:category_slug . "emacs"))
-    (nndiscourse-rpc-request "" "category_latest_topics" :category_slug "emacs")))
+    (nndiscourse-rpc-request server "category_latest_topics" :category_slug "emacs")))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
-  (seq-map (-rpartial #'plist-get :title) (nndiscourse-get-topics "" "emacs")))
+(let ((server "emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :title) (nndiscourse-get-topics server "emacs")))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
-  (seq-map (-rpartial #'plist-get :topic_title) (nndiscourse-get-posts "" :before 71000)))
+(let ((server "emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :topic_title) (nndiscourse-get-posts server :before 71000)))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
-  (apply #'min (seq-map (-rpartial #'plist-get :id) (nndiscourse-get-posts ""))))
+(let ((server "emacs-china.org"))
+  (apply #'min (seq-map (-rpartial #'plist-get :id) (nndiscourse-get-posts server))))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
+(let ((server "emacs-china.org"))
   (seq-filter (lambda (raw) (cl-search "org-mode" raw))
-              (seq-map (lambda (x) (plist-get x :raw)) (nndiscourse-get-posts ""))))
+              (seq-map (lambda (x) (plist-get x :raw)) (nndiscourse-get-posts server))))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
+(let ((server "emacs-china.org"))
   (seq-filter (lambda (raw) (cl-search "word wrap" (cdr raw)))
               (seq-map (lambda (x) (cons (plist-get x :raw) (plist-get x :topic_title)))
-                       (nndiscourse-get-posts ""))))
+                       (nndiscourse-get-posts server))))
 
-(let ((nndiscourse-url "https://emacs-china.org"))
-  (seq-map (-rpartial #'plist-get :slug) (nndiscourse-get-categories "")))
+(let ((server "emacs-china.org"))
+  (seq-map (-rpartial #'plist-get :slug) (nndiscourse-get-categories server)))
 
-
-(add-to-list 'gnus-secondary-select-methods '(nndiscourse ""))
-(gnus-server-to-method "nndiscourse:")
 (gnus-group-full-name "programming" "nndiscourse:")
-(gnus-get-info (gnus-group-full-name "programming" "nndiscourse:"))
+
+(let ((server "emacs-china.org"))
+  (gnus-get-info (gnus-group-full-name "programming" `(nndiscourse ,server))))
 
 (let* ((rpc (json-rpc-connect "localhost" 8999))
        (cooked (plist-get (json-rpc rpc "get_post" 12) :cooked)))
@@ -281,3 +280,36 @@
             plst)
       posts-hashtb)
     nndiscourse-headers-hashtb))
+
+(setq gnus-server-method-cache nil)
+(gnus-server-to-method "nndiscourse:emacs-china.org")
+
+(setq gnus-secondary-select-methods (cdr gnus-secondary-select-methods))
+
+(gnus-method-to-server-name '(nndiscourse "emacs-china.org" :scheme "https"))
+(gnus-find-method-for-group "nndiscourse+emacs-china.org:emacs-general")
+
+(add-to-list 'gnus-secondary-select-methods '(nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))
+(nndiscourse-open-server "emacs-china.org")
+(nndiscourse-proc-info-process (cdr (assoc "emacs-china.org" nndiscourse-processes)))
+(let ((nntp-server-buffer (get-buffer-create "foo")))
+  (nndiscourse-request-list "emacs-china.org"))
+
+(process-contact (alist-get "emacs-china.org" nndiscourse-processes nil nil #'equal))
+
+(mapcan (lambda (b) (let ((foo (buffer-name b)))
+                      (and (cl-search "stderr" foo) (list foo))))
+        (buffer-list))
+
+(gnus-find-method-for-group "nndiscourse+emacs-china.org:emacs")
+
+
+(condition-case nil
+    (prog1 t
+      (delete-process (make-network-process :name "test-port"
+                                            :noquery t
+                                            :host nndiscourse-localhost
+                                            :service 37529
+                                            :buffer nil
+                                            :stop t)))
+  (file-error nil))
