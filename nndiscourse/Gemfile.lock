@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/dickmao/discourse_api.git
-  revision: 6783c8aecb20dbc86e0ed6c7ff69ae6ec8e9a8c4
+  revision: f7e79ed525bc65567eba49a838d02c8f4a595318
   branch: dev
   specs:
     discourse_api (0.38.0.pre.dev)
@@ -12,7 +12,6 @@ PATH
   remote: .
   specs:
     nndiscourse (0.1.0)
-      discourse_api
       jimson (~> 0.11.0)
       thor (~> 0.20.3)
 

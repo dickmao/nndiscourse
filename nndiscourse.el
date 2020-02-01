@@ -8,6 +8,8 @@
 ;; URL: https://github.com/dickmao/nndiscourse
 ;; Package-Requires: ((emacs "25.1") (dash "2.16") (dash-functional "1.2.0") (anaphora "1.0.4"))
 
+;; ((dash-functional "20180107") (anaphora "20180618"))
+
 ;; This file is NOT part of GNU Emacs.
 
 ;; This program is free software: you can redistribute it and/or modify
@@ -28,10 +30,6 @@
 ;; A Gnus backend for Discourse.
 
 ;;; Code:
-
-(eval-when-compile (require 'cl-lib)
-                   (cl-assert (fboundp 'libxml-parse-html-region) nil
-                              "nndiscourse requires emacs built with libxml support"))
 
 (require 'nnoo)
 (require 'gnus)
@@ -339,8 +337,29 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
 (deffoo nndiscourse-status-message (&optional _server)
   "")
 
+(defun nndiscourse--initialize ()
+  "Run `bundle install` if necessary."
+  (let ((bundle-exec (executable-find "bundle"))
+        (default-directory
+          (expand-file-name "nndiscourse"
+                            (file-name-directory
+                             (or (locate-library "nndiscourse")
+                                 default-directory)))))
+    (unless bundle-exec
+      (error "`nndiscourse--initialize': nndiscourse requires bundler"))
+    (unless (zerop (call-process bundle-exec nil nil nil "check"))
+      (let ((bundle-buffer (get-buffer-create "*nndiscourse: bundle install*")))
+        (if (zerop (apply #'call-process bundle-exec nil
+                          (cons bundle-buffer (list t))
+                          nil (split-string "install --deployment --without development")))
+            (kill-buffer bundle-buffer)
+          (switch-to-buffer bundle-buffer)
+          (error "`nndiscourse--initialize': bundle install failed"))))))
+
 (deffoo nndiscourse-open-server (server &optional defs)
   "Retrieve the Jimson process for SERVER."
+  (when defs ;; defs should be non-nil when called from `gnus-open-server'
+    (nndiscourse--initialize))
   (nnoo-change-server 'nndiscourse server defs)
   (let* ((proc-buf (nndiscourse--server-buffer server t))
          (proc (get-buffer-process proc-buf)))
@@ -368,31 +387,31 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
                     (apply-partially 'nndiscourse--message-user server)
                     nil t))
         (nndiscourse-register-process
-          free-port
-          (let ((default-directory
-                  (expand-file-name "nndiscourse"
-                                    (file-name-directory
-                                     (or (locate-library "nndiscourse")
-                                         default-directory)))))
-            (let ((new-proc (make-process :name server
-                                          :buffer proc-buf
-                                          :command ruby-command
-                                          :noquery t
-                                          :sentinel #'nndiscourse-sentinel
-                                          :stderr stderr-buffer)))
-              (cl-loop repeat 10
-                       until (condition-case nil
-                                 (prog1 t
-                                   (delete-process
-                                    (make-network-process :name "test-port"
-                                                          :noquery t
-                                                          :host nndiscourse-localhost
-                                                          :service free-port
-                                                          :buffer nil
-                                                          :stop t)))
-                               (file-error nil))
-                       do (accept-process-output new-proc 0.3))
-              new-proc)))))))
+         free-port
+         (let ((default-directory
+                 (expand-file-name "nndiscourse"
+                                   (file-name-directory
+                                    (or (locate-library "nndiscourse")
+                                        default-directory)))))
+           (let ((new-proc (make-process :name server
+                                         :buffer proc-buf
+                                         :command ruby-command
+                                         :noquery t
+                                         :sentinel #'nndiscourse-sentinel
+                                         :stderr stderr-buffer)))
+             (cl-loop repeat 10
+                      until (condition-case nil
+                                (prog1 t
+                                  (delete-process
+                                   (make-network-process :name "test-port"
+                                                         :noquery t
+                                                         :host nndiscourse-localhost
+                                                         :service free-port
+                                                         :buffer nil
+                                                         :stop t)))
+                              (file-error nil))
+                      do (accept-process-output new-proc 0.3))
+             new-proc)))))))
 
 (defun nndiscourse-register-process (port proc)
   "Register PORT and PROC with a server-name-qua-url.

@@ -2,7 +2,7 @@
 (source melpa)
 
 (package-file "nndiscourse.el")
-(files "nndiscourse.el" "nndiscourse")
+(files "nndiscourse.el" ("nndiscourse" "nndiscourse/Gemfile" "nndiscourse/Gemfile.lock" "nndiscourse/nndiscourse.gemspec" "nndiscourse/nndiscourse.thor" "nndiscourse/lib"))
 
 (development
  (depends-on "ert-runner")

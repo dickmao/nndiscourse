@@ -6,6 +6,7 @@ endif
 CASK_DIR := $(shell EMACS=$(EMACS) cask package-directory || exit 1)
 SRC=$(shell $(CASK) files)
 PKBUILD=2.3
+VERSION=$(shell $(CASK) version)
 ELCFILES = $(SRC:.el=.elc)
 
 .DEFAULT_GOAL := test-compile
@@ -81,9 +82,31 @@ dist-clean:
 dist: dist-clean
 	$(CASK) package
 
+.PHONY: backup-melpa
+backup-melpa:
+	$(EMACS) -Q --batch --eval "(package-initialize)" --eval \
+	  "(with-temp-buffer \
+	    (insert-file-contents-literally (car (file-expand-wildcards \"dist/nndiscourse-$(VERSION).tar\"))) \
+	    (tar-mode) \
+	    (let* ((my-desc (package-tar-file-info)) \
+	           (name (package-desc-name my-desc)) \
+	           (other-pkgs (cdr (assq name package-alist)))) \
+	      (when other-pkgs \
+	        (mapcar (lambda (odesc) \
+	                  (let* ((odir (package-desc-dir odesc)) \
+	                         (parent (file-name-directory odir)) \
+	                         (leaf (file-name-nondirectory odir))) \
+	                    (if (equal (package-desc-version my-desc) \
+	                               (package-desc-version odesc)) \
+	                        (delete-directory odir t) \
+	                      (rename-file odir \
+	                                   (expand-file-name (format \"BACKUP-%s\" leaf) parent) \
+	                                   t)))) \
+	                other-pkgs))))"
+
 .PHONY: install
-install: test-compile dist
+install: test-compile dist backup-melpa
 	$(EMACS) -Q --batch --eval "(package-initialize)" \
 	  --eval "(add-to-list 'package-archives '(\"melpa\" . \"http://melpa.org/packages/\"))" \
 	  --eval "(package-refresh-contents)" \
-	  --eval "(package-install-file (car (file-expand-wildcards \"dist/nndiscourse*.tar\")))"
+	  --eval "(package-install-file (car (file-expand-wildcards \"dist/nndiscourse-$(VERSION).tar\")))"

@@ -16,4 +16,5 @@ cask emacs -Q --batch \
            --eval "(push (quote (\"melpa\" . \"http://melpa.org/packages/\")) \
                          package-archives)" \
            --eval "(package-refresh-contents)" \
+           --eval "(setq debug-on-error t)" \
            -f package-lint-batch-and-exit "$1"

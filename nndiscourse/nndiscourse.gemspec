@@ -12,11 +12,12 @@ Gem::Specification.new do |spec|
   spec.homepage      = 'https://github.com/dickmao/nndiscourse'
   spec.license       = 'GPLv3'
 
-  spec.files         = `git ls-files`.split("\n")
-  spec.executables   = `git ls-files`.split("\n").map { |f| f =~ %r{/^bin/(.*)/} ? Regexp.last_match[1] : nil }.compact
+  spec.files         = Dir['lib/**/*.rb']
+  spec.test_files    = spec.files.grep(%r{^spec/})
+  spec.executables   = spec.files.grep(%r{^bin/}).map { |f| File.basename(f) }
   spec.require_path  = 'lib'
 
-  spec.add_runtime_dependency 'discourse_api'
+#  spec.add_runtime_dependency 'discourse_api'
   spec.add_runtime_dependency 'jimson', '~> 0.11.0'
   spec.add_runtime_dependency 'thor', '~> 0.20.3'
 

@@ -6,3 +6,4 @@ bin/
 vendor/
 nndiscourse*.gem
 dist/
+.bundle
