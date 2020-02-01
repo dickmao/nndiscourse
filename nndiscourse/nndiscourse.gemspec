@@ -17,7 +17,6 @@ Gem::Specification.new do |spec|
   spec.executables   = spec.files.grep(%r{^bin/}).map { |f| File.basename(f) }
   spec.require_path  = 'lib'
 
-#  spec.add_runtime_dependency 'discourse_api'
   spec.add_runtime_dependency 'jimson', '~> 0.11.0'
   spec.add_runtime_dependency 'thor', '~> 0.20.3'
 
