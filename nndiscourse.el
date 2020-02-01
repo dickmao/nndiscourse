@@ -347,7 +347,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
                                  default-directory)))))
     (unless bundle-exec
       (error "`nndiscourse--initialize': nndiscourse requires bundler"))
-    (unless (zerop (call-process bundle-exec nil nil nil "check"))
+    (unless (file-exists-p (expand-file-name "vendor"))
       (let ((bundle-buffer (get-buffer-create "*nndiscourse: bundle install*")))
         (if (zerop (apply #'call-process bundle-exec nil
                           (cons bundle-buffer (list t))
