@@ -20,6 +20,47 @@
   result)
 
 ;; rich man's
+(add-to-list 'gnus-secondary-select-methods '(nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))
+
+(let ((server "emacs-china.org"))
+  (seq-filter (lambda (raw) (cl-search "emacs" (cdr raw)))
+              (seq-map (lambda (x) (cons (plist-get x :raw) (plist-get x :topic_title)))
+                       (nndiscourse-get-posts server))))
+
+(let* ((server "emacs-china.org")
+       (headers (nndiscourse-get-headers server)))
+  (cons (nndiscourse--first-article-number server)
+        (nndiscourse--last-article-number server))
+  (nndiscourse--get-header server 72124))
+
+(let ((server "emacs-china.org")
+      (nndiscourse--last-id nil))
+  (nndiscourse-set-headers server nil)
+  (nndiscourse--incoming server)
+  (length (nndiscourse-get-headers server)))
+
+(let ((server "emacs-china.org"))
+  (nndiscourse--incoming server)
+  (length (nndiscourse-get-headers server)))
+
+(let ((server "emacs-china.org"))
+  (nndiscourse-get-ref
+    server
+    (plist-get (car (last (nndiscourse-get-headers server))) :id)))
+
+(let ((server "emacs-china.org")
+      result)
+  (length (nndiscourse-get-headers server))
+  (with-current-buffer (nndiscourse--server-buffer server)
+    (nndiscourse--maphash
+     (lambda (key value)
+       (!cons `(,key ,(nndiscourse-get-ref server key)) result))
+     nndiscourse-refs-hashtb))
+  result)
+
+(nndiscourse--gethash "emacs-china.org" nndiscourse-headers-hashtb)
+
+(setq nndiscourse-headers-hashtb (gnus-make-hashtable))
 (let ((server "emacs-china.org"))
   (seq-map (-rpartial #'plist-get :post_number)
            (plist-get (nndiscourse-rpc-request "" "posts" :before 0) :latest_posts)))
@@ -290,6 +331,7 @@
 (gnus-find-method-for-group "nndiscourse+emacs-china.org:emacs-general")
 
 (add-to-list 'gnus-secondary-select-methods '(nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))
+
 (nndiscourse-open-server "emacs-china.org")
 (nndiscourse-proc-info-process (cdr (assoc "emacs-china.org" nndiscourse-processes)))
 (let ((nntp-server-buffer (get-buffer-create "foo")))

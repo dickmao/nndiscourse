@@ -105,7 +105,7 @@ backup-melpa:
 	                other-pkgs))))"
 
 .PHONY: install
-install: test-compile dist backup-melpa
+install: dist backup-melpa
 	$(EMACS) -Q --batch --eval "(package-initialize)" \
 	  --eval "(add-to-list 'package-archives '(\"melpa\" . \"http://melpa.org/packages/\"))" \
 	  --eval "(package-refresh-contents)" \

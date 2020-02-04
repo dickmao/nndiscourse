@@ -8,4 +8,5 @@
  (depends-on "ert-runner")
  (depends-on "package-lint")
  (depends-on "json-rpc")
+ (depends-on "rbenv")
  (depends-on "ecukes"))
