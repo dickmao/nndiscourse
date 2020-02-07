@@ -713,12 +713,6 @@ Originally written by Paul Issartel."
            (gnus-message 3 "nndiscourse--incoming: cannot update read for %s" group))
          (nndiscourse-set-headers server group
            (nconc (nndiscourse-get-headers server group) (list plst)))))
-     (let* ((group "emacs")
-            (full-group (gnus-group-full-name group
-                                              (cons 'nndiscourse (list server))))
-            (info (gnus-get-info full-group))
-            (active `(,(nndiscourse--first-article-number server group) .
-                      ,(nndiscourse--last-article-number server group)))))
      (gnus-message
       5 (concat "nndiscourse--incoming: "
                 (format "last-id: %d, " nndiscourse--last-id)
@@ -838,26 +832,32 @@ article header.  Gnus manual does say the term `header` is oft conflated."
       ;; o.w. gnus-group-method in gnus-group-change-level yields (nndiscourse "")
       (if (nndiscourse-open-server server)
           (with-current-buffer nntp-server-buffer
-            (erase-buffer) ;; i've seen a gnus-notification intercept me
             (mapc
              (lambda (plst)
                (let* ((group (plist-get plst :slug))
                       (category-id (plist-get plst :id))
                       (full-name (gnus-group-full-name group `(nndiscourse ,server))))
-                 (let ((nntp-server-buffer ;; o.w. request-list is just last group
-                        (generate-new-buffer (buffer-name nntp-server-buffer))))
-                   ;; only `gnus-activate-group' seems to call `gnus-parse-active'
-                   (gnus-activate-group full-name nil nil `(nndiscourse ,server))
-                   (gnus-group-unsubscribe-group full-name
-                                                 gnus-level-default-subscribed t)
-                   (kill-buffer nntp-server-buffer))
+                 (erase-buffer)
+                 ;; only `gnus-activate-group' seems to call `gnus-parse-active'
+                 (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+                 (gnus-group-unsubscribe-group full-name
+                                               gnus-level-default-subscribed t)
                  (nndiscourse-set-category server category-id group)
-                 (insert (format "%s %d 1 y\n" group
-                                 (length (nndiscourse-get-headers server group))))
+
                  (push group groups)))
-             (nndiscourse-get-categories server)))
-        (gnus-message 3 "nndiscourse-request-list: could not retrieve jimson process")))
-    (nreverse groups)))
+             (nndiscourse-get-categories server))
+            (erase-buffer)
+            (mapc (lambda (group)
+                    (insert
+                     (format "%s %d %d y\n" group
+                             (aif (nndiscourse--last-article-number server group)
+                                 it 0)
+                             (aif (nndiscourse--first-article-number server group)
+                                 it 1))))
+                  groups)
+            t)
+        (gnus-message 3 "nndiscourse-request-list: could not retrieve jimson process")
+        nil))))
 
 (defun nndiscourse-sentinel (process event)
   "Wipe headers state when PROCESS dies from EVENT."

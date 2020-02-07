@@ -431,3 +431,5 @@
                                             :buffer nil
                                             :stop t)))
   (file-error nil))
+
+(gnus-compress-sequence (gnus-range-normalize '(72330 . 72367)))
