@@ -28,20 +28,38 @@
                        (nndiscourse-get-posts server))))
 
 (let* ((server "emacs-china.org")
+       (group "emacs")
        (headers (nndiscourse-get-headers server)))
-  (cons (nndiscourse--first-article-number server)
-        (nndiscourse--last-article-number server))
+  (cons (nndiscourse--first-article-number server group)
+        (nndiscourse--last-article-number server group))
   (nndiscourse--get-header server 72124))
 
+(let ((nntp-server-buffer (get-buffer-create "foo")))
+  (nndiscourse-request-list "emacs-china.org"))
+
 (let ((server "emacs-china.org")
-      (nndiscourse--last-id nil))
-  (nndiscourse-set-headers server nil)
+      result)
+  (with-current-buffer (nndiscourse--server-buffer server)
+    (mapatoms (lambda (k)
+                (push (nndiscourse-get-category server k) result))
+              nndiscourse--categories-hashtb)
+    result))
+
+(let ((server "emacs-china.org")
+      (nndiscourse--last-id nil)
+      (group "emacs"))
+  (with-current-buffer (nndiscourse--server-buffer server)
+    (mapatoms (lambda (k)
+                (nndiscourse-set-headers server k nil))
+              nndiscourse--headers-hashtb))
   (nndiscourse--incoming server)
-  (length (nndiscourse-get-headers server)))
+  (length (nndiscourse-get-headers server group)))
+
+(nndiscourse-get-headers "emacs-china.org" "emacs")
 
 (let ((server "emacs-china.org"))
   (nndiscourse--incoming server)
-  (length (nndiscourse-get-headers server)))
+  (length (nndiscourse-get-headers server "emacs")))
 
 (let ((server "emacs-china.org"))
   (nndiscourse-get-ref
@@ -58,7 +76,65 @@
      nndiscourse-refs-hashtb))
   result)
 
+(let ((foo (lambda (f &rest args)
+             (cl-macrolet ((gnus-active (_group) `(cons 1 10)))
+               (apply f args)))))
+  (add-function :around (symbol-function 'gnus-group-insert-group-line-info)
+                foo)
+  (unwind-protect (gnus-group-insert-group-line-info "nndiscourse:emacs")
+    (remove-function (symbol-function 'gnus-group-insert-group-line-info) foo)))
+
+(gnus-group-entry "nndiscourse:emacs")
+
+(gnus-info-read (gnus-get-info "nndiscourse:emacs"))
+
+(let ((foo (lambda (args)
+             (let ((group (car args)))
+               (if (gnus-group-entry group)
+                   args
+                 (setf (nthcdr 3 args) 10)
+                 args))))
+      (group "nndiscourse:emacs"))
+  (add-function :filter-args (symbol-function 'gnus-group-insert-group-line) foo)
+  (unwind-protect
+      (gnus-group-insert-group-line group
+                                    gnus-level-killed
+                                    nil
+                                    40
+                                    (gnus-method-simplify
+                                     (gnus-find-method-for-group group)))
+    (remove-function (symbol-function 'gnus-group-insert-group-line) foo)))
+
+
+
 (nndiscourse--gethash "emacs-china.org" nndiscourse-headers-hashtb)
+
+(defun nndiscourse--get-header (server group article-number)
+  "Amongst SERVER GROUP headers, binary search ARTICLE-NUMBER."
+  (declare (indent defun))
+  (let ((headers (nndiscourse-get-headers server group)))
+   (cl-flet ((id-of (k) (plist-get (elt headers k) :id)))
+     (cl-do* ((x article-number)
+              (l 0 (if (> x m) (1+ m) l))
+              (r (length headers) (if (< x m) m r))
+              (m (/ (- r l) 2)))
+         ((or (<= (- r l) 1) (= x (id-of m)))
+          (and (< m (length headers)) (>= m 0) (= x (id-of m)) (elt headers m)))))))
+
+(defun bsearch (article-number)
+  (let ((headers '((:id 3) (:id 5) (:id 13) (:id 23) (:id 30))))
+    (cl-flet ((id-of (k) (plist-get (elt headers k) :id)))
+      (cl-do* ((x article-number)
+               (l 0 (if dir (1+ m) l))
+               (r (length headers) (if dir r m))
+               (m (/ (- r l) 2) (+ m (* (if dir 1 -1) (max 1 (/ (- r l) 2)))))
+               (dir (> x (id-of m)) (> x (id-of m))))
+          ((or (<= (- r l) 1) (= x (id-of m)))
+           (and (< m (length headers)) (>= m 0) (= x (id-of m)) (elt headers m)))
+        ))))
+
+(bsearch 29)
+
 
 (setq nndiscourse-headers-hashtb (gnus-make-hashtable))
 (let ((server "emacs-china.org"))
