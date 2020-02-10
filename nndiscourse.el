@@ -291,22 +291,20 @@ Process stays the same, but the `json-rpc' connection (a cheap struct) gets
 reinstantiated with every call.
 
 Return response of METHOD ARGS of type `json-object-type' or nil if failure."
-  (if (nndiscourse-open-server server)
-      (condition-case-unless-debug err
-          (let* ((port (nndiscourse-proc-info-port
-                        (cdr (assoc server nndiscourse-processes))))
-                 (connection (json-rpc-connect nndiscourse-localhost port)))
-            (when-let ((threads-p (fboundp 'set-process-thread))
-                       (proc (json-rpc-process connection)))
-              (set-process-thread proc nil))
-            (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
-              (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
-                            (mapconcat (lambda (s) (format "%s" s)) args " "))
-              (json-rpc connection method args)))
-        (error (prog1 nil
-                 (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))
-    (prog1 nil
-      (gnus-message 3 "nndiscourse-rpc-request: could not retrieve jimson process"))))
+  (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
+    (condition-case-unless-debug err
+        (let* ((port (nndiscourse-proc-info-port
+                      (cdr (assoc server nndiscourse-processes))))
+               (connection (json-rpc-connect nndiscourse-localhost port)))
+          (when-let ((threads-p (fboundp 'set-process-thread))
+                     (proc (json-rpc-process connection)))
+            (set-process-thread proc nil))
+          (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
+            (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
+                          (mapconcat (lambda (s) (format "%s" s)) args " "))
+            (json-rpc connection method args)))
+      (error (prog1 nil
+               (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))))
 
 (defun nndiscourse-vote-current-article (vote)
   "VOTE is +1, -1, 0."
@@ -376,7 +374,10 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
           (error "`nndiscourse--initialize': bundle install failed"))))))
 
 (deffoo nndiscourse-open-server (server &optional defs)
-  "Retrieve the Jimson process for SERVER."
+  "Retrieve the Jimson process for SERVER.
+
+I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
+`gnus-get-unread-articles' to open server upon install."
   (when (nndiscourse-good-server server)
     (let ((original-global-rbenv-mode global-rbenv-mode))
       (unless global-rbenv-mode
@@ -437,9 +438,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
                                                                     :stop t)))
                                          (file-error nil))
                                  do (accept-process-output new-proc 0.3))
-                        new-proc))))
-                ;; need categories for `nndiscourse--incoming'
-                (nndiscourse-request-list server))))
+                        new-proc)))))))
         (unless original-global-rbenv-mode
           (global-rbenv-mode -1))))))
 
@@ -660,6 +659,8 @@ Originally written by Paul Issartel."
   "Drink from the SERVER firehose."
   (interactive)
   (setq nndiscourse--debug-request-posts nil)
+  (unless (nndiscourse--maphash #'cons nndiscourse--categories-hashtb)
+    (nndiscourse-request-list server))
   (cl-loop
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
@@ -816,37 +817,56 @@ article header.  Gnus manual does say the term `header` is oft conflated."
           (nnheader-insert-nov header)))
       'nov)))
 
+;; Primarily because `gnus-get-unread-articles' won't update unreads
+;; upon install (nndiscourse won't yet be in type-cache).
+;; I am counting on logic in `gnus-read-active-file-1' in `gnus-get-unread-articles'
+;; to get here upon install.
+(deffoo nndiscourse-retrieve-groups (groups &optional server)
+  (when (nndiscourse-good-server server)
+    ;; utterly insane thing where `gnus-active-to-gnus-format' expects
+    ;; `gnus-request-list' output to be in `nntp-server-buffer'
+    ;; and populates `gnus-active-hashtb'
+    (nndiscourse-request-list server)
+    (with-current-buffer nntp-server-buffer
+      (gnus-active-to-gnus-format
+       (gnus-server-to-method (format "nndiscourse:%s" server))
+       gnus-active-hashtb nil t))
+    (mapc (lambda (group)
+            (let ((full-name (gnus-group-full-name group `(nndiscourse ,server))))
+              (gnus-get-unread-articles-in-group (gnus-get-info full-name)
+                                                 (gnus-active full-name))))
+          groups)
+    ;; `gnus-read-active-file-2' will now repeat what I just did.  Brutal.
+    'active))
+
 (deffoo nndiscourse-request-list (&optional server)
   (let (groups)
-    (when (nndiscourse-good-server server)
-      ;; o.w. gnus-group-method in gnus-group-change-level yields (nndiscourse "")
-      (if (nndiscourse-open-server server)
-          (with-current-buffer nntp-server-buffer
-            (mapc
-             (lambda (plst)
-               (let* ((group (plist-get plst :slug))
-                      (category-id (plist-get plst :id))
-                      (full-name (gnus-group-full-name group `(nndiscourse ,server))))
-                 (erase-buffer)
-                 ;; only `gnus-activate-group' seems to call `gnus-parse-active'
-                 (gnus-activate-group full-name nil nil `(nndiscourse ,server))
-                 (gnus-group-unsubscribe-group full-name
-                                               gnus-level-default-subscribed t)
-                 (nndiscourse-set-category server category-id group)
-                 (push group groups)))
-             (nndiscourse-get-categories server))
-            (erase-buffer)
-            (mapc (lambda (group)
-                    (insert
-                     (format "%s %d %d y\n" group
-                             (aif (nndiscourse--last-article-number server group)
-                                 it 0)
-                             (aif (nndiscourse--first-article-number server group)
-                                 it 1))))
-                  groups)
-            t)
-        (gnus-message 3 "nndiscourse-request-list: could not retrieve jimson process")
-        nil))))
+    (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
+      (with-current-buffer nntp-server-buffer
+        (mapc
+         (lambda (plst)
+           (let* ((group (plist-get plst :slug))
+                  (category-id (plist-get plst :id))
+                  (full-name (gnus-group-full-name group `(nndiscourse ,server))))
+             (erase-buffer)
+             ;; only `gnus-activate-group' seems to call `gnus-parse-active'
+             (unless (gnus-get-info full-name)
+               (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+               (gnus-group-unsubscribe-group full-name
+                                             gnus-level-default-subscribed t))
+             (nndiscourse-set-category server category-id group)
+             (push group groups)))
+         (nndiscourse-get-categories server))
+        (erase-buffer)
+        (mapc (lambda (group)
+                (insert
+                 (format "%s %d %d y\n" group
+                         (aif (nndiscourse--last-article-number server group)
+                             it 0)
+                         (aif (nndiscourse--first-article-number server group)
+                             it 1))))
+              groups)))
+    t))
 
 (defun nndiscourse-sentinel (process event)
   "Wipe headers state when PROCESS dies from EVENT."
