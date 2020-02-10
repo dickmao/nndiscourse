@@ -306,33 +306,6 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
       (error (prog1 nil
                (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))))
 
-(defun nndiscourse-vote-current-article (vote)
-  "VOTE is +1, -1, 0."
-  (unless gnus-newsgroup-name (error "No current newgroup"))
-  (if-let ((article-number (or (cdr gnus-article-current)
-                               (gnus-summary-article-number))))
-      (let* ((header (nndiscourse--get-header (nnoo-current-server 'nndiscourse)
-                                              (gnus-group-real-name gnus-newsgroup-name)
-                                              article-number))
-             (orig-score (format "%s" (plist-get header :score)))
-             (new-score (if (zerop vote) orig-score
-                          (concat orig-score " "
-                                  (if (> vote 0) "+" "")
-                                  (format "%s" vote))))
-             (server (cl-second (gnus-find-method-for-group gnus-newsgroup-name))))
-        (save-excursion
-          (save-window-excursion
-            (with-current-buffer gnus-summary-buffer
-              (if (eq (gnus-summary-article-number) (cdr gnus-article-current))
-                  (if (nndiscourse--request-vote server (plist-get header :id) vote)
-                      (with-current-buffer gnus-article-buffer
-                        (let ((inhibit-read-only t))
-                          (nnheader-replace-header "Score" new-score)))
-                    (gnus-message 5 "nndiscourse-vote-current-article: failed for %s"
-                                  (plist-get header :id)))
-                (message "Open the article before voting."))))))
-    (error "No current article")))
-
 (defsubst nndiscourse--gate (&optional group)
   "Apply our minor modes only when the following conditions hold for GROUP."
   (unless group
@@ -599,16 +572,6 @@ Originally written by Paul Issartel."
       (gnus-message 7 "nndiscourse-request-group: %s" status)
       (nnheader-insert "%s\n" status))
     t))
-
-(defun nndiscourse--request-vote (server item vote)
-  "Tally on SERVER for ITEM the VOTE."
-  (if (> vote 0)
-      (nndiscourse-rpc-request server "create_post_action"
-                               :id (plist-get item :id)
-                               :post_action_type_id 2)
-    (nndiscourse-rpc-request server "destroy_post_action"
-                             :id (plist-get item :id)
-                             :post_action_type_id 2)))
 
 (defun nndiscourse--request-item (id server)
   "Retrieve ID from SERVER as a property list."
