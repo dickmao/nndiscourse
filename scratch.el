@@ -433,3 +433,124 @@
   (file-error nil))
 
 (gnus-compress-sequence (gnus-range-normalize '(72330 . 72367)))
+
+(set (gv-ref (with-current-buffer "scratch.el<nndiscourse>"
+               this-is-mine)) t)
+
+
+(format-time-string "%a, %d %h %Y %T %z (%Z)" (date-to-time "2020-02-04T12:52:06.942Z"))
+(date-to-time "2020-02-04T12:52:06.942Z")
+
+(let ((marks '((unexist (1 . 1) 4) (halle t)))
+      (marks nil))
+  (setf (alist-get 'unexist marks) `((2 . 2) (1 . 1)))
+  (alist-get 'unexist marks)
+  )
+
+(require 'shr)
+(rfc2231-parse-qp-string "Content-Type: text/html; charset=UTF-8")
+
+(defmacro mm-with-part (handle &rest forms)
+  "Run FORMS in the temp buffer containing the contents of HANDLE."
+  `(let* ((handle ,handle))
+     (when (and (mm-handle-buffer handle)
+		(buffer-name (mm-handle-buffer handle)))
+       (with-temp-buffer
+         (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters
+                                                   (mm-handle-buffer handle)))
+	 (insert-buffer-substring (mm-handle-buffer handle))
+	 (mm-decode-content-transfer-encoding
+	  (mm-handle-encoding handle)
+	  (mm-handle-media-type handle))
+	 ,@forms))))
+
+(defun mm-shr (handle)
+  (let ((shr-width (if shr-use-fonts
+		       nil
+		     fill-column))
+	(shr-content-function (lambda (id)
+				(let ((handle (mm-get-content-id id)))
+				  (when handle
+				    (mm-with-part handle
+				      (buffer-string))))))
+	(shr-inhibit-images mm-html-inhibit-images)
+	(shr-blocked-images mm-html-blocked-images)
+	charset coding char document)
+    (mm-with-part (or handle (setq handle (mm-dissect-buffer t)))
+      (setq case-fold-search t)
+      (or (setq charset
+		(mail-content-type-get (mm-handle-type handle) 'charset))
+	  (progn
+	    (goto-char (point-min))
+	    (and (re-search-forward "\
+<meta\\s-+http-equiv=[\"']?content-type[\"']?\\s-+content=[\"']?\
+text/html;\\s-*charset=\\([^\t\n\r \"'>]+\\)[^>]*>" nil t)
+		 (setq coding (mm-charset-to-coding-system (match-string 1)
+							   nil t))))
+	  (setq charset mail-parse-charset))
+      (when (and (or coding
+		     (setq coding (mm-charset-to-coding-system charset nil t)))
+		 (not (eq coding 'ascii)))
+        (let ((convert (buffer-string)))
+          (insert (prog1
+                      (decode-coding-string convert coding)
+                    (erase-buffer)
+                    (set-buffer-multibyte t)))))
+      (goto-char (point-min))
+      (while (re-search-forward
+	      "&#\\(?:x\\([89][0-9a-f]\\)\\|\\(1[2-5][0-9]\\)\\);" nil t)
+	(when (setq char
+		    (cdr (assq (if (match-beginning 1)
+				   (string-to-number (match-string 1) 16)
+				 (string-to-number (match-string 2)))
+			       mm-extra-numeric-entities)))
+	  (replace-match (char-to-string char))))
+      ;; Remove "soft hyphens".
+      (goto-char (point-min))
+      (while (search-forward "­" nil t)
+	(replace-match "" t t))
+      (setq document (libxml-parse-html-region (point-min) (point-max))))
+    (save-restriction
+      (narrow-to-region (point) (point))
+      (shr-insert-document document)
+      (unless (bobp)
+	(insert "\n"))
+      (mm-handle-set-undisplayer
+       handle
+       (let ((min (point-min-marker))
+             (max (point-max-marker)))
+         (lambda ()
+	   (let ((inhibit-read-only t))
+	     (delete-region min max))))))))
+
+(with-temp-buffer
+  (set-buffer-multibyte t)
+  (save-excursion
+    (insert "<p>最近也想尝试,但是感觉蛮难的,比如不知道如何在"))
+  (let ((handle (mm-make-handle
+                 (current-buffer)
+                 (rfc2231-parse-qp-string "Content-Type: text/html; charset=UTF-8"))))
+    (cl-assert (not (zerop (length (with-temp-buffer (mm-shr handle)
+                                                     (buffer-string))))))))
+
+(require 'polymode-core)
+(defun ein:markdown-syntax-propertize (start end)
+  "Function used as `syntax-propertize-function'.
+START and END delimit region to propertize."
+  (message "got here %s %s %s" start end (pm-innermost-range start))
+  (with-silent-modifications
+    (save-excursion
+      (remove-text-properties start end ein:markdown--syntax-properties)
+      (ein:markdown-syntax-propertize-fenced-block-constructs start end)
+      (ein:markdown-syntax-propertize-list-items start end)
+      (ein:markdown-syntax-propertize-pre-blocks start end)
+      (ein:markdown-syntax-propertize-blockquotes start end)
+      (ein:markdown-syntax-propertize-headings start end)
+      (ein:markdown-syntax-propertize-hrs start end)
+      (ein:markdown-syntax-propertize-comments start end))))
+
+;; Same boat here, although I am only trying to use User-Api-Key (not Api-Key) to create a topic post and am getting CSRF denial from the actionpack library.
+
+;; Unless the discourse server has turned off CSRF checking, posting from a third-party desktop app seems hard. I’m not about to emulate a browser.
+
+;; which see ~/discourse_api/gem-transcript{,2}

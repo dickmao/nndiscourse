@@ -57,6 +57,9 @@
 (defvoo nndiscourse-scheme "https"
   "URI scheme for address.")
 
+(defvoo nndiscourse-charset "utf-8"
+  "Charset for address.")
+
 (defcustom nndiscourse-render-post t
   "If non-nil, follow link upon `gnus-summary-select-article'.
 Otherwise, just display link."
@@ -510,12 +513,6 @@ Then execute BODY."
           ((or (<= (- r l) 1) (= x (id-of m)))
            (and (< m (length headers)) (>= m 0) (= x (id-of m)) (elt headers m)))))))
 
-(defun nndiscourse--get-body (header)
-  "Get full text of submission or post HEADER."
-  (if-let ((url (plist-get header :url)))
-      (format "<div><p><a href=\"%s\">%s</a></div>" url url)
-    (or (plist-get header :text) "")))
-
 (defun nndiscourse--massage (body)
   "Precede each quoted line of BODY broken by `shr-fill-line' with '>'."
   (with-temp-buffer
@@ -783,7 +780,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
              (mail-header (nndiscourse--make-header server group article-number))
              (score (cdr (assq 'X-Discourse-Score (mail-header-extra mail-header))))
              (permalink (cdr (assq 'X-Discourse-Permalink (mail-header-extra mail-header))))
-             (body (nndiscourse--massage (nndiscourse--get-body header))))
+             (body (nndiscourse--massage (plist-get header :cooked))))
         (when body
           (insert
            "Newsgroups: " group "\n"
@@ -792,7 +789,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
            "Date: " (mail-header-date mail-header) "\n"
            "Message-ID: " (mail-header-id mail-header) "\n"
            "References: " (mail-header-references mail-header) "\n"
-           "Content-Type: text/html; charset=utf-8" "\n"
+           (format "Content-Type: text/html; charset=%s" nndiscourse-charset) "\n"
            "Archived-at: " permalink "\n"
            "Score: " score "\n"
            "\n")
@@ -802,19 +799,12 @@ article header.  Gnus manual does say the term `header` is oft conflated."
                 (or (plist-get (nndiscourse--get-header server group parent)
                                :username)
                     "Someone"))
-               (parent-body (nndiscourse--get-body (nndiscourse--get-header
-                                                     server group parent))))
+               (parent-body (nndiscourse--massage
+                             (plist-get
+                              (nndiscourse--get-header server group parent)
+                              :cooked))))
             (insert (nndiscourse--citation-wrap parent-author parent-body)))
-          (aif (and nndiscourse-render-post (plist-get header :url))
-              (condition-case err
-                  (nndiscourse--request "nndiscourse-request-article" it
-                                         :success (cl-function
-                                                   (lambda (&key data &allow-other-keys)
-                                                     (insert data))))
-                (error (gnus-message 5 "nndiscourse-request-article: %s"
-                                     (error-message-string err))
-                       (insert body)))
-            (insert body))
+          (insert body)
           (cons group article-number))))))
 
 (deffoo nndiscourse-retrieve-headers (article-numbers &optional group server _fetch-old)
@@ -843,7 +833,6 @@ article header.  Gnus manual does say the term `header` is oft conflated."
                  (gnus-group-unsubscribe-group full-name
                                                gnus-level-default-subscribed t)
                  (nndiscourse-set-category server category-id group)
-
                  (push group groups)))
              (nndiscourse-get-categories server))
             (erase-buffer)
@@ -887,11 +876,16 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 (defun nndiscourse--browse-post (&rest _args)
   "What happens when I click on discourse Subject."
   (-when-let* ((group-article gnus-article-current)
-               (url (plist-get (nndiscourse--get-header
-                                 (nnoo-current-server 'nndiscourse)
-                                 (gnus-group-real-name (car group-article))
-                                 (cdr group-article))
-                           :url)))
+               (header (nndiscourse--get-header
+                         (nnoo-current-server 'nndiscourse)
+                         (gnus-group-real-name (car group-article))
+                         (cdr group-article)))
+               (url (format "%s://%s/t/%s/%s/%s"
+                            nndiscourse-scheme
+                            (nnoo-current-server 'nndiscourse)
+                            (plist-get header :topic_slug)
+                            (plist-get header :topic_id)
+                            (plist-get header :post_number))))
     (browse-url url)))
 
 (defun nndiscourse--header-button-alist ()
@@ -913,7 +907,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
   (let* ((header (nndiscourse--get-header (nnoo-current-server 'nndiscourse)
                    (gnus-group-real-name (car gnus-article-current))
                    (cdr gnus-article-current)))
-         (body (nndiscourse--massage (nndiscourse--get-body header))))
+         (body (nndiscourse--massage (plist-get header :cooked))))
     (with-current-buffer gnus-original-article-buffer
       (article-goto-body)
       (delete-region (point) (point-max))
@@ -1097,6 +1091,92 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                                                 (equal (car method) "nndiscourse"))
                                               gnus-valid-select-methods))
 (gnus-declare-backend "nndiscourse" 'post-mail 'address)
+
+;; correct what I perceive to be a bug
+;; (and prevents multibyte Chinese characters from displaying)
+(require 'mm-decode)
+
+(defvar shr-blocked-images)
+(defvar shr-use-fonts)
+(defvar shr-width)
+(defvar shr-content-function)
+(defvar shr-inhibit-images)
+
+(defmacro nndiscourse-with-part (handle &rest forms)
+  "Override `mm-with-part' massaging message from HANDLE then executing FORMS."
+  `(let* ((handle ,handle))
+     (when (and (mm-handle-buffer handle)
+		(buffer-name (mm-handle-buffer handle)))
+       (with-temp-buffer
+         (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters
+                                                   (mm-handle-buffer handle)))
+	 (insert-buffer-substring (mm-handle-buffer handle))
+	 (mm-decode-content-transfer-encoding
+	  (mm-handle-encoding handle)
+	  (mm-handle-media-type handle))
+	 ,@forms))))
+
+(defun nndiscourse-shr (handle)
+  "Override `mm-shr' for HANDLE."
+  (require 'shr)
+  (let ((shr-width (if shr-use-fonts
+		       nil
+		     fill-column))
+	(shr-content-function (lambda (id)
+				(let ((handle (mm-get-content-id id)))
+				  (when handle
+				    (nndiscourse-with-part handle
+				      (buffer-string))))))
+	(shr-inhibit-images mm-html-inhibit-images)
+	(shr-blocked-images mm-html-blocked-images)
+	charset coding char document)
+    (nndiscourse-with-part (or handle (setq handle (mm-dissect-buffer t)))
+      (setq case-fold-search t)
+      (or (setq charset
+		(mail-content-type-get (mm-handle-type handle) 'charset))
+	  (progn
+	    (goto-char (point-min))
+	    (and (re-search-forward "\
+<meta\\s-+http-equiv=[\"']?content-type[\"']?\\s-+content=[\"']?\
+text/html;\\s-*charset=\\([^\t\n\r \"'>]+\\)[^>]*>" nil t)
+		 (setq coding (mm-charset-to-coding-system (match-string 1)
+							   nil t))))
+	  (setq charset mail-parse-charset))
+      (when (and (or coding
+		     (setq coding (mm-charset-to-coding-system charset nil t)))
+		 (not (eq coding 'ascii)))
+	(insert (prog1
+		    (decode-coding-string (buffer-string) coding)
+		  (erase-buffer)
+		  (set-buffer-multibyte t))))
+      (goto-char (point-min))
+      (while (re-search-forward
+	      "&#\\(?:x\\([89][0-9a-f]\\)\\|\\(1[2-5][0-9]\\)\\);" nil t)
+	(when (setq char
+		    (cdr (assq (if (match-beginning 1)
+				   (string-to-number (match-string 1) 16)
+				 (string-to-number (match-string 2)))
+			       mm-extra-numeric-entities)))
+	  (replace-match (char-to-string char))))
+      ;; Remove "soft hyphens".
+      (goto-char (point-min))
+      (while (search-forward "­" nil t)
+	(replace-match "" t t))
+      (setq document (libxml-parse-html-region (point-min) (point-max))))
+    (save-restriction
+      (narrow-to-region (point) (point))
+      (shr-insert-document document)
+      (unless (bobp)
+	(insert "\n"))
+      (mm-handle-set-undisplayer
+       handle
+       (let ((min (point-min-marker))
+             (max (point-max-marker)))
+         (lambda ()
+	   (let ((inhibit-read-only t))
+	     (delete-region min max))))))))
+
+(setf (alist-get 'shr mm-text-html-renderer-alist) 'nndiscourse-shr)
 
 (provide 'nndiscourse)
 
