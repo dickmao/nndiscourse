@@ -9,7 +9,6 @@
 (custom-set-variables
  '(auto-revert-verbose nil)
  '(auto-revert-stop-on-user-input nil)
- '(gnus-read-active-file nil)
  '(gnus-batch-mode t)
  '(gnus-use-dribble-file nil)
  '(gnus-read-newsrc-file nil)

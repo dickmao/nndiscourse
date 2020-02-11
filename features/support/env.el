@@ -48,7 +48,8 @@
  (add-function
   :around (symbol-function 'nndiscourse-rpc-request)
   (lambda (f server method &rest method-args)
-    (let ((sig (make-symbol (mapconcat #'identity (cons method method-args) "-"))))
+    (let ((sig (intern (mapconcat (apply-partially #'format "%s")
+                                  (cons method method-args) "-"))))
       (if scenario-recording-p
           (let ((result (apply f server method method-args)))
             (prog1 result
