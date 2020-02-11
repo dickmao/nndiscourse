@@ -1,6 +1,6 @@
 |build-status|
 
-A Gnus backend for Discourse.
+.. COMMENTARY (see Makefile)
 
 .. |build-status|
    image:: https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg

@@ -17,6 +17,12 @@ ELCTESTS = $(TESTSSRC:.el=.elc)
 autoloads:
 	$(EMACS) -Q --batch --eval "(package-initialize)" --eval "(package-generate-autoloads \"nndiscourse\" \".\")"
 
+README.rst: README.in.rst nndiscourse.el
+	grep ';;' nndiscourse.el \
+	    | awk '/;;;\s*Commentary/{within=1;next}/;;;\s*/{within=0}within' \
+	    | sed -e 's/^\s*;;*\s*//g' \
+	    | tools/readme-sed.sh "COMMENTARY" README.in.rst > README.rst
+
 .PHONY: clean
 clean:
 	$(CASK) clean-elc
