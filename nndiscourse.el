@@ -190,21 +190,6 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   :lighter " Discourse"
   :keymap nndiscourse-summary-mode-map)
 
-(defsubst nndiscourse-novote ()
-  "Retract vote."
-  (interactive)
-  (nndiscourse-vote-current-article 0))
-
-(defsubst nndiscourse-downvote ()
-  "Downvote the article in current buffer."
-  (interactive)
-  (nndiscourse-vote-current-article -1))
-
-(defsubst nndiscourse-upvote ()
-  "Upvote the article in current buffer."
-  (interactive)
-  (nndiscourse-vote-current-article 1))
-
 (defsubst nndiscourse--server-buffer-name (server)
   "Arbitrary proc buffer name for SERVER."
   (when (nndiscourse-good-server server)
@@ -628,8 +613,9 @@ Originally written by Paul Issartel."
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
    for posts = (nndiscourse-get-posts server :before (1- page-bottom))
-   do (setq nndiscourse--last-id (or nndiscourse--last-id
-                                     (1- (plist-get (elt posts (1- (length posts))) :id))))
+   do (unless nndiscourse--last-id
+        (setq nndiscourse--last-id
+              (1- (plist-get (elt posts (1- (length posts))) :id))))
    do (cl-do* ((k 0 (1+ k))
                (plst (and (< k (length posts)) (elt posts k))
                      (and (< k (length posts)) (elt posts k))))
@@ -1039,24 +1025,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
  (lambda (&rest _args)
    (when (nndiscourse--gate)
      (concat (nndiscourse--who-am-i) "@discourse.org"))))
-
-(add-function
- :around (symbol-function 'message-is-yours-p)
- (lambda (f &rest args)
-   (let ((concat-func (lambda (f &rest args)
-                       (let ((fetched (apply f args)))
-                         (if (string= (car args) "from")
-                             (concat fetched "@discourse.org")
-                           fetched)))))
-     (when (nndiscourse--gate)
-       (add-function :around
-                     (symbol-function 'message-fetch-field)
-                     concat-func))
-     (condition-case err
-         (prog1 (apply f args)
-           (remove-function (symbol-function 'message-fetch-field) concat-func))
-       (error (remove-function (symbol-function 'message-fetch-field) concat-func)
-              (error (error-message-string err)))))))
 
 ;; the let'ing to nil of `gnus-summary-display-article-function'
 ;; in `gnus-summary-select-article' dates back to antiquity.

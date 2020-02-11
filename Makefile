@@ -4,11 +4,13 @@ ifeq ($(CASK),)
 $(error Please install CASK at https://cask.readthedocs.io/en/latest/guide/installation.html)
 endif
 CASK_DIR := $(shell EMACS=$(EMACS) cask package-directory || exit 1)
-SRC=$(shell $(CASK) files)
-PKBUILD=2.3
-VERSION=$(shell $(CASK) version)
+SRC = $(shell $(CASK) files)
+PKBUILD = 2.3
+VERSION = $(shell $(CASK) version)
 ELCFILES = $(SRC:.el=.elc)
-
+TESTS = $(shell ls tests/test*el)
+TESTSSRC = $(TESTS) features/support/env.el tests/nndiscourse-test.el
+ELCTESTS = $(TESTSSRC:.el=.elc)
 .DEFAULT_GOAL := test-compile
 
 .PHONY: autoloads
@@ -31,6 +33,10 @@ $(CASK_DIR): Cask
 
 .PHONY: test-compile
 test-compile: cask autoloads
+	! ($(CASK) eval \
+	      "(cl-letf (((symbol-function (quote cask-files)) (lambda (&rest _args) (mapcar (function symbol-name) (quote ($(TESTSSRC))))))) \
+	          (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):")
+	rm -f $(ELCTESTS)
 	$(MAKE) -C nndiscourse $@
 	sh -e tools/package-lint.sh ./nndiscourse.el
 	! ($(CASK) eval "(let ((byte-compile-error-on-warn t)) (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):")
@@ -64,7 +70,7 @@ test-run-interactive:
 
 .PHONY: test-unit
 test-unit:
-	$(CASK) exec ert-runner -L . -L tests tests/test*.el
+	$(CASK) exec ert-runner -L . -L tests $(TESTS)
 
 .PHONY: test
 test: test-compile test-unit test-int

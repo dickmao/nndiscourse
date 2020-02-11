@@ -8,4 +8,4 @@ test-compile:
 
 .PHONY: clean
 clean:
-	bundle clean
+	@echo Not running bundle clean
