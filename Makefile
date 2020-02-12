@@ -3,7 +3,7 @@ export CASK := $(shell which cask)
 ifeq ($(CASK),)
 $(error Please install CASK at https://cask.readthedocs.io/en/latest/guide/installation.html)
 endif
-CASK_DIR := $(shell EMACS=$(EMACS) cask package-directory || exit 1)
+CASK_DIR := $(shell $(CASK) package-directory || exit 1)
 SRC = $(shell $(CASK) files)
 PKBUILD = 2.3
 VERSION = $(shell $(CASK) version)

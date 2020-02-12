@@ -262,6 +262,8 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
                                          (make-mutex "nndiscourse--mutex-rpc-request"))
   "Only one jsonrpc output buffer, so avoid two requests using at the same time.")
 
+(declare-function set-process-thread "process" t t) ;; emacs-25
+
 (defun nndiscourse-rpc-request (server method &rest args)
   "Make jsonrpc call to SERVER invoking METHOD ARGS.
 
@@ -407,7 +409,7 @@ Same argument meanings for KEY ALIST DEFAULT REMOVE and TESTFN."
   (ignore remove)
   (let ((x (if (not testfn)
                (assq key alist)
-             (assoc key alist testfn))))
+             (assoc key alist))))
     (if x (cdr x) default)))
 
 (gv-define-expander nndiscourse-alist-get
@@ -415,7 +417,7 @@ Same argument meanings for KEY ALIST DEFAULT REMOVE and TESTFN."
     (macroexp-let2 macroexp-copyable-p k key
       (gv-letplace (getter setter) alist
         (macroexp-let2 nil p `(if (and ,testfn (not (eq ,testfn 'eq)))
-                                  (assoc ,k ,getter ,testfn)
+                                  (assoc ,k ,getter)
                                 (assq ,k ,getter))
           (funcall do (if (null default) `(cdr ,p)
                         `(if ,p (cdr ,p) ,default))
