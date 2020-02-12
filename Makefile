@@ -3,7 +3,7 @@ export CASK := $(shell which cask)
 ifeq ($(CASK),)
 $(error Please install CASK at https://cask.readthedocs.io/en/latest/guide/installation.html)
 endif
-CASK_DIR := $(shell EMACS=$(EMACS) cask package-directory || exit 1)
+CASK_DIR := $(shell $(CASK) package-directory || exit 1)
 SRC = $(shell $(CASK) files)
 PKBUILD = 2.3
 VERSION = $(shell $(CASK) version)
@@ -16,6 +16,12 @@ ELCTESTS = $(TESTSSRC:.el=.elc)
 .PHONY: autoloads
 autoloads:
 	$(EMACS) -Q --batch --eval "(package-initialize)" --eval "(package-generate-autoloads \"nndiscourse\" \".\")"
+
+README.rst: README.in.rst nndiscourse.el
+	grep ';;' nndiscourse.el \
+	    | awk '/;;;\s*Commentary/{within=1;next}/;;;\s*/{within=0}within' \
+	    | sed -e 's/^\s*;;*\s*//g' \
+	    | tools/readme-sed.sh "COMMENTARY" README.in.rst > README.rst
 
 .PHONY: clean
 clean:

@@ -262,6 +262,8 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
                                          (make-mutex "nndiscourse--mutex-rpc-request"))
   "Only one jsonrpc output buffer, so avoid two requests using at the same time.")
 
+(declare-function set-process-thread "process" t t) ;; emacs-25
+
 (defun nndiscourse-rpc-request (server method &rest args)
   "Make jsonrpc call to SERVER invoking METHOD ARGS.
 
@@ -277,7 +279,7 @@ reinstantiated with every call.
 
 Return response of METHOD ARGS of type `json-object-type' or nil if failure."
   (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
-    (condition-case-unless-debug err
+    (condition-case err
         (let* ((port (nndiscourse-proc-info-port
                       (cdr (assoc server nndiscourse-processes))))
                (connection (json-rpc-connect nndiscourse-localhost port)))
@@ -400,6 +402,47 @@ I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
         (unless original-global-rbenv-mode
           (global-rbenv-mode -1))))))
 
+(defun nndiscourse-alist-get (key alist &optional default remove testfn)
+  "Replicated library function for emacs-25.
+
+Same argument meanings for KEY ALIST DEFAULT REMOVE and TESTFN."
+  (ignore remove)
+  (let ((x (if (not testfn)
+               (assq key alist)
+             (assoc key alist))))
+    (if x (cdr x) default)))
+
+(gv-define-expander nndiscourse-alist-get
+  (lambda (do key alist &optional default remove testfn)
+    (macroexp-let2 macroexp-copyable-p k key
+      (gv-letplace (getter setter) alist
+        (macroexp-let2 nil p `(if (and ,testfn (not (eq ,testfn 'eq)))
+                                  (assoc ,k ,getter)
+                                (assq ,k ,getter))
+          (funcall do (if (null default) `(cdr ,p)
+                        `(if ,p (cdr ,p) ,default))
+                   (lambda (v)
+                     (macroexp-let2 nil v v
+                       (let ((set-exp
+                              `(if ,p (setcdr ,p ,v)
+                                 ,(funcall setter
+                                           `(cons (setq ,p (cons ,k ,v))
+                                                  ,getter)))))
+                         `(progn
+                            ,(cond
+                             ((null remove) set-exp)
+                             ((or (eql v default)
+                                  (and (eq (car-safe v) 'quote)
+                                       (eq (car-safe default) 'quote)
+                                       (eql (cadr v) (cadr default))))
+                              `(if ,p ,(funcall setter `(delq ,p ,getter))))
+                             (t
+                              `(cond
+                                ((not (eql ,default ,v)) ,set-exp)
+                                (,p ,(funcall setter
+                                              `(delq ,p ,getter))))))
+                            ,v))))))))))
+
 (defun nndiscourse-register-process (port proc)
   "Register PORT and PROC with a server-name-qua-url.
 Return PROC if success, nil otherwise."
@@ -409,7 +452,8 @@ Return PROC if success, nil otherwise."
       (prog1 proc
         (gnus-message 5 "nndiscourse-register-process: registering %s"
                       (process-name proc))
-        (setf (alist-get (process-name proc) nndiscourse-processes nil nil #'equal)
+        (setf (nndiscourse-alist-get (process-name proc) nndiscourse-processes
+                                     nil nil #'equal)
               (make-nndiscourse-proc-info :port port :process proc)))
     (prog1 nil
       (gnus-message 3 "`nndiscourse-register-process': dead process %s"
@@ -418,12 +462,12 @@ Return PROC if success, nil otherwise."
 
 (defun nndiscourse-deregister-process (server)
   "Disavow any knowledge of SERVER's process."
-  (aif (alist-get server nndiscourse-processes nil nil #'equal)
+  (aif (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal)
       (let ((proc (nndiscourse-proc-info-process it)))
         (gnus-message 5 "`nndiscourse-deregister-process': deregistering %s %s pid=%s"
                       server (process-name proc) (process-id proc))
         (delete-process proc)))
-  (setf (alist-get server nndiscourse-processes nil nil #'equal) nil))
+  (setf (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal) nil))
 
 (deffoo nndiscourse-close-server (&optional server _defs)
   "Patterning after nnimap.el."
@@ -531,7 +575,6 @@ Originally written by Paul Issartel."
   (nndiscourse--with-group server group
     (gnus-message 5 "nndiscourse-request-group-scan: scanning %s..." group)
     (nndiscourse-request-scan nil server)
-    (gnus-activate-group gnus-newsgroup-name t nil (gnus-info-method info))
     (gnus-get-unread-articles-in-group
      (or info (gnus-get-info gnus-newsgroup-name))
      (gnus-active (gnus-info-group info)))
@@ -579,7 +622,8 @@ Originally written by Paul Issartel."
 (defun nndiscourse-get-categories (server)
   "Query SERVER /categories.json."
   (seq-filter (lambda (x) (eq json-false (plist-get x :read_restricted)))
-              (funcall #'nndiscourse-rpc-request server "categories")))
+              (let ((cats (funcall #'nndiscourse-rpc-request server "categories")))
+                (if (seqp cats) cats nil))))
 
 (cl-defun nndiscourse-get-topics (server slug &key (page 0))
   "Query SERVER /c/SLUG/l/latest.json, optionally for PAGE."
@@ -589,7 +633,9 @@ Originally written by Paul Issartel."
 
 (cl-defun nndiscourse-get-posts (server &key (before 0))
   "Query SERVER /posts.json for posts before BEFORE."
-  (plist-get (funcall #'nndiscourse-rpc-request server "posts" :before before) :latest_posts))
+  (plist-get (let ((result (funcall #'nndiscourse-rpc-request server
+                                    "posts" :before before)))
+               (if (listp result) result nil)) :latest_posts))
 
 (defun nndiscourse--number-to-header (server group topic-id post-number)
   "O(n) search for SERVER GROUP TOPIC-ID POST-NUMBER in headers."
@@ -603,16 +649,23 @@ Originally written by Paul Issartel."
                                 (= post-number* (plist-get plst :post_number))))))))
     (elt headers found)))
 
+(defsubst nndiscourse-hash-count (table-or-obarray)
+  "Return number items in TABLE-OR-OBARRAY."
+  (let ((result 0))
+    (nndiscourse--maphash (lambda (&rest _args) (cl-incf result)) table-or-obarray)
+    result))
+
 (defun nndiscourse--incoming (server)
   "Drink from the SERVER firehose."
   (interactive)
   (setq nndiscourse--debug-request-posts nil)
-  (unless (nndiscourse--maphash #'cons nndiscourse--categories-hashtb)
+  (when (zerop (nndiscourse-hash-count nndiscourse--categories-hashtb))
     (nndiscourse-request-list server))
   (cl-loop
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
    for posts = (nndiscourse-get-posts server :before (1- page-bottom))
+   until (null posts)
    do (unless nndiscourse--last-id
         (setq nndiscourse--last-id
               (1- (plist-get (elt posts (1- (length posts))) :id))))
@@ -662,7 +715,7 @@ Originally written by Paul Issartel."
            (nconc (nndiscourse-get-headers server group) (list plst)))))
      (gnus-message
       5 (concat "nndiscourse--incoming: "
-                (format "last-id: %d, " nndiscourse--last-id)
+                (format "last-id: %s, " nndiscourse--last-id)
                 (let ((result ""))
                   (nndiscourse--maphash
                    (lambda (key value)

@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         emacs_version: [25.1, 26.3]
-        ruby-version: [2.6]
+        ruby_version: [2.6]
         include:
           - emacs_version: 24.1
             lint_ignore: 1
@@ -26,13 +26,17 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - uses: actions/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby_version }}
+
     - uses: purcell/setup-emacs@master
       with:
         version: ${{ matrix.emacs_version }}
 
     - uses: dickmao/setup-paths@master
       with:
-        paths: local/bin:local/cask/bin:.rbenv/bin
+        paths: local/bin:local/cask/bin
 
     - uses: actions/cache@v1
       if: startsWith(runner.os, 'Linux')
@@ -45,13 +49,6 @@ jobs:
       with:
         path: ~/Library/Caches/rubocop_cache
         key: ${{ runner.os }}-rubocop
-
-    - uses: actions/cache@v1
-      with:
-        path: ~/.rbenv
-        key: ${{ runner.os }}-rbenv-${{ hashFiles('**/.ruby-version') }}
-        restore-keys: |
-          {{ runner.os }}-rbenv-
 
     - uses: actions/cache@v1
       with:
@@ -68,24 +65,16 @@ jobs:
         path: ~/.cask
         key: cask-000
 
-    - name: macos-rbenv
-      if: startsWith(runner.os, 'macOS')
-      run: brew list rbenv &>/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install rbenv
-
-    - name: linux-rbenv
-      if: startsWith(runner.os, 'Linux')
-      uses: |
-        masa-iwasaki/setup-rbenv@v1
-
-    - name: ruby
-      run: |
-        eval "eval $(rbenv init - --no-rehash)"
-        rbenv install -s ${{ matrix.ruby-version }}
+    - uses: actions/cache@v1
+      with:
+        path: nndiscourse/vendor/bundle
+        key: ${{ runner.os }}-gems-${{ hashFiles('**/Gemfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-gems-
 
     - name: bundler
       run: |
-        eval "eval $(rbenv init - --no-rehash)"
-        gem install bundler
+        gem install --user-install bundler
 
     - name: apt-get
       if: startsWith(runner.os, 'Linux')
@@ -113,5 +102,4 @@ jobs:
 
     - name: test
       run: |
-        eval "eval $(rbenv init - --no-rehash)"
         make test
