@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         emacs_version: [25.1, 26.3]
-        ruby_version: [2.6.3]
+        ruby_version: [2.6]
         include:
           - emacs_version: 24.1
             lint_ignore: 1
@@ -25,6 +25,10 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
+    - uses: actions/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby_version }}
 
     - uses: purcell/setup-emacs@master
       with:
@@ -48,13 +52,6 @@ jobs:
 
     - uses: actions/cache@v1
       with:
-        path: ~/.rbenv
-        key: ${{ runner.os }}-rbenv
-        restore-keys: |
-          ${{ runner.os }}-rbenv-${{ matrix.ruby_version }}
-
-    - uses: actions/cache@v1
-      with:
         path: ~/local
         key: ${{ runner.os }}-local-000
 
@@ -68,24 +65,15 @@ jobs:
         path: ~/.cask
         key: cask-000
 
-    - name: macos-rbenv
-      if: startsWith(runner.os, 'macOS')
-      run: brew list rbenv &>/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 brew install rbenv
-
-    - name: linux-rbenv
-      if: startsWith(runner.os, 'Linux')
-      uses: |
-        masa-iwasaki/setup-rbenv@v1
-
-    - name: ruby
-      run: |
-        eval "$(rbenv init -)"
-        rbenv install -s ${{ matrix.ruby_version }}
-        rbenv local ${{ matrix.ruby_version }}
+    - uses: actions/cache@v1
+      with:
+        path: nndiscourse/vendor/bundle
+        key: ${{ runner.os }}-gems-${{ hashFiles('**/Gemfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-gems-
 
     - name: bundler
       run: |
-        eval "$(rbenv init -)"
         gem install --user-install bundler
 
     - name: apt-get
@@ -100,7 +88,6 @@ jobs:
 
     - name: versions
       run: |
-        eval "$(rbenv init -)"
         ruby --version
         rake --version
         bundle --version
@@ -115,5 +102,4 @@ jobs:
 
     - name: test
       run: |
-        eval "$(rbenv init -)"
         make test
