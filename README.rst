@@ -35,19 +35,21 @@ Also see Troubleshooting_.
 
 Usage
 =====
-Suppose you want to follow "https://emacs-china.org".  In your ``.emacs`` or ``init.el``, use ONE of the following:
+Suppose you want to follow https://emacs-china.org.  In your ``.emacs`` or ``init.el``, use ONE of the following:
 
 ::
 
    ;; Applies to first-time Gnus users
-   (custom-set-variables '(gnus-select-method (quote (nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))))
+   (custom-set-variables '(gnus-select-method
+       (quote (nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))))
 
 or, if you're an existing Gnus user,
 
 ::
 
    ;; Applies to existing Gnus users
-   (add-to-list 'gnus-secondary-select-methods (quote (nndiscourse "emacs-china.org" (nndiscourse-scheme "https"))))
+   (add-to-list 'gnus-secondary-select-methods
+       (quote (nndiscourse "emacs-china.org" (nndiscourse-scheme "https"))))
 
 Then ``M-x gnus``.
 
