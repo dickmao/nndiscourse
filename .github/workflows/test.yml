@@ -49,7 +49,7 @@ jobs:
     - uses: actions/cache@v1
       with:
         path: ~/.rbenv
-        key: ${{ runner.os }}-rbenv-${{ hashFiles('**/.ruby-version') }}
+        key: ${{ runner.os }}-rbenv-${{ hashFiles('~/.rbenv/version') }}
         restore-keys: |
           {{ runner.os }}-rbenv-
 

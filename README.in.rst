@@ -51,7 +51,7 @@ or, if you're an existing Gnus user,
 
 Then ``M-x gnus``.
 
-Select a category via ``RET``.  Rapidly catch yourself up via ``N`` and ``P``.  Instantly catch-up with ``c``.
+Select a topic category via ``RET``.  Rapidly catch yourself up via ``N`` and ``P``.  Instantly catch-up with ``c``.
 
 From the ``*Group*`` buffer, press ``g`` to refresh all categories.  ``M-g`` on a particular category to refresh individually.
 
