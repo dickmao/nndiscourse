@@ -462,17 +462,17 @@ Return PROC if success, nil otherwise."
 
 (defun nndiscourse-deregister-process (server)
   "Disavow any knowledge of SERVER's process."
-  (aif (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal)
-      (let ((proc (nndiscourse-proc-info-process it)))
-        (gnus-message 5 "`nndiscourse-deregister-process': deregistering %s %s pid=%s"
-                      server (process-name proc) (process-id proc))
-        (delete-process proc)))
+  (awhen (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal)
+    (let ((proc (nndiscourse-proc-info-process it)))
+      (gnus-message 5 "`nndiscourse-deregister-process': deregistering %s %s pid=%s"
+                    server (process-name proc) (process-id proc))
+      (delete-process proc)))
   (setf (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal) nil))
 
 (deffoo nndiscourse-close-server (&optional server _defs)
   "Patterning after nnimap.el."
-  (aif (nndiscourse--server-buffer server)
-      (kill-buffer it))
+  (awhen (nndiscourse--server-buffer server)
+    (kill-buffer it))
   (when (nnoo-change-server 'nndiscourse server nil)
     (nnoo-close-server 'nndiscourse server)
     t))
