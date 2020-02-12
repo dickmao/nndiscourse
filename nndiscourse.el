@@ -277,7 +277,7 @@ reinstantiated with every call.
 
 Return response of METHOD ARGS of type `json-object-type' or nil if failure."
   (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
-    (condition-case-unless-debug err
+    (condition-case err
         (let* ((port (nndiscourse-proc-info-port
                       (cdr (assoc server nndiscourse-processes))))
                (connection (json-rpc-connect nndiscourse-localhost port)))
@@ -531,7 +531,6 @@ Originally written by Paul Issartel."
   (nndiscourse--with-group server group
     (gnus-message 5 "nndiscourse-request-group-scan: scanning %s..." group)
     (nndiscourse-request-scan nil server)
-    (gnus-activate-group gnus-newsgroup-name t nil (gnus-info-method info))
     (gnus-get-unread-articles-in-group
      (or info (gnus-get-info gnus-newsgroup-name))
      (gnus-active (gnus-info-group info)))
@@ -579,7 +578,8 @@ Originally written by Paul Issartel."
 (defun nndiscourse-get-categories (server)
   "Query SERVER /categories.json."
   (seq-filter (lambda (x) (eq json-false (plist-get x :read_restricted)))
-              (funcall #'nndiscourse-rpc-request server "categories")))
+              (let ((cats (funcall #'nndiscourse-rpc-request server "categories")))
+                (if (seqp cats) cats nil))))
 
 (cl-defun nndiscourse-get-topics (server slug &key (page 0))
   "Query SERVER /c/SLUG/l/latest.json, optionally for PAGE."
@@ -589,7 +589,9 @@ Originally written by Paul Issartel."
 
 (cl-defun nndiscourse-get-posts (server &key (before 0))
   "Query SERVER /posts.json for posts before BEFORE."
-  (plist-get (funcall #'nndiscourse-rpc-request server "posts" :before before) :latest_posts))
+  (plist-get (let ((result (funcall #'nndiscourse-rpc-request server
+                                    "posts" :before before)))
+               (if (listp result) result nil)) :latest_posts))
 
 (defun nndiscourse--number-to-header (server group topic-id post-number)
   "O(n) search for SERVER GROUP TOPIC-ID POST-NUMBER in headers."
@@ -603,16 +605,23 @@ Originally written by Paul Issartel."
                                 (= post-number* (plist-get plst :post_number))))))))
     (elt headers found)))
 
+(defsubst nndiscourse-hash-count (table-or-obarray)
+  "Return number items in TABLE-OR-OBARRAY."
+  (let ((result 0))
+    (nndiscourse--maphash (lambda (&rest _args) (cl-incf result)) table-or-obarray)
+    result))
+
 (defun nndiscourse--incoming (server)
   "Drink from the SERVER firehose."
   (interactive)
   (setq nndiscourse--debug-request-posts nil)
-  (unless (nndiscourse--maphash #'cons nndiscourse--categories-hashtb)
+  (when (zerop (nndiscourse-hash-count nndiscourse--categories-hashtb))
     (nndiscourse-request-list server))
   (cl-loop
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
    for posts = (nndiscourse-get-posts server :before (1- page-bottom))
+   until (null posts)
    do (unless nndiscourse--last-id
         (setq nndiscourse--last-id
               (1- (plist-get (elt posts (1- (length posts))) :id))))
@@ -662,7 +671,7 @@ Originally written by Paul Issartel."
            (nconc (nndiscourse-get-headers server group) (list plst)))))
      (gnus-message
       5 (concat "nndiscourse--incoming: "
-                (format "last-id: %d, " nndiscourse--last-id)
+                (format "last-id: %s, " nndiscourse--last-id)
                 (let ((result ""))
                   (nndiscourse--maphash
                    (lambda (key value)

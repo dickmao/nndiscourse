@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         emacs_version: [25.1, 26.3]
-        ruby-version: [2.6]
+        ruby_version: [2.6.3]
         include:
           - emacs_version: 24.1
             lint_ignore: 1
@@ -32,7 +32,7 @@ jobs:
 
     - uses: dickmao/setup-paths@master
       with:
-        paths: local/bin:local/cask/bin:.rbenv/bin
+        paths: local/bin:local/cask/bin
 
     - uses: actions/cache@v1
       if: startsWith(runner.os, 'Linux')
@@ -49,9 +49,9 @@ jobs:
     - uses: actions/cache@v1
       with:
         path: ~/.rbenv
-        key: ${{ runner.os }}-rbenv-${{ hashFiles('~/.rbenv/version') }}
+        key: ${{ runner.os }}-rbenv
         restore-keys: |
-          {{ runner.os }}-rbenv-
+          ${{ runner.os }}-rbenv-${{ matrix.ruby_version }}
 
     - uses: actions/cache@v1
       with:
@@ -79,13 +79,14 @@ jobs:
 
     - name: ruby
       run: |
-        eval "eval $(rbenv init - --no-rehash)"
-        rbenv install -s ${{ matrix.ruby-version }}
+        eval "$(rbenv init -)"
+        rbenv install -s ${{ matrix.ruby_version }}
+        rbenv local ${{ matrix.ruby_version }}
 
     - name: bundler
       run: |
-        eval "eval $(rbenv init - --no-rehash)"
-        gem install bundler
+        eval "$(rbenv init -)"
+        gem install --user-install bundler
 
     - name: apt-get
       if: startsWith(runner.os, 'Linux')
@@ -99,6 +100,7 @@ jobs:
 
     - name: versions
       run: |
+        eval "$(rbenv init -)"
         ruby --version
         rake --version
         bundle --version
@@ -113,5 +115,5 @@ jobs:
 
     - name: test
       run: |
-        eval "eval $(rbenv init - --no-rehash)"
+        eval "$(rbenv init -)"
         make test
