@@ -400,6 +400,47 @@ I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
         (unless original-global-rbenv-mode
           (global-rbenv-mode -1))))))
 
+(defun nndiscourse-alist-get (key alist &optional default remove testfn)
+  "Replicated library function for emacs-25.
+
+Same argument meanings for KEY ALIST DEFAULT REMOVE and TESTFN."
+  (ignore remove)
+  (let ((x (if (not testfn)
+               (assq key alist)
+             (assoc key alist testfn))))
+    (if x (cdr x) default)))
+
+(gv-define-expander nndiscourse-alist-get
+  (lambda (do key alist &optional default remove testfn)
+    (macroexp-let2 macroexp-copyable-p k key
+      (gv-letplace (getter setter) alist
+        (macroexp-let2 nil p `(if (and ,testfn (not (eq ,testfn 'eq)))
+                                  (assoc ,k ,getter ,testfn)
+                                (assq ,k ,getter))
+          (funcall do (if (null default) `(cdr ,p)
+                        `(if ,p (cdr ,p) ,default))
+                   (lambda (v)
+                     (macroexp-let2 nil v v
+                       (let ((set-exp
+                              `(if ,p (setcdr ,p ,v)
+                                 ,(funcall setter
+                                           `(cons (setq ,p (cons ,k ,v))
+                                                  ,getter)))))
+                         `(progn
+                            ,(cond
+                             ((null remove) set-exp)
+                             ((or (eql v default)
+                                  (and (eq (car-safe v) 'quote)
+                                       (eq (car-safe default) 'quote)
+                                       (eql (cadr v) (cadr default))))
+                              `(if ,p ,(funcall setter `(delq ,p ,getter))))
+                             (t
+                              `(cond
+                                ((not (eql ,default ,v)) ,set-exp)
+                                (,p ,(funcall setter
+                                              `(delq ,p ,getter))))))
+                            ,v))))))))))
+
 (defun nndiscourse-register-process (port proc)
   "Register PORT and PROC with a server-name-qua-url.
 Return PROC if success, nil otherwise."
@@ -409,7 +450,8 @@ Return PROC if success, nil otherwise."
       (prog1 proc
         (gnus-message 5 "nndiscourse-register-process: registering %s"
                       (process-name proc))
-        (setf (alist-get (process-name proc) nndiscourse-processes nil nil #'equal)
+        (setf (nndiscourse-alist-get (process-name proc) nndiscourse-processes
+                                     nil nil #'equal)
               (make-nndiscourse-proc-info :port port :process proc)))
     (prog1 nil
       (gnus-message 3 "`nndiscourse-register-process': dead process %s"
@@ -418,12 +460,12 @@ Return PROC if success, nil otherwise."
 
 (defun nndiscourse-deregister-process (server)
   "Disavow any knowledge of SERVER's process."
-  (aif (alist-get server nndiscourse-processes nil nil #'equal)
+  (aif (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal)
       (let ((proc (nndiscourse-proc-info-process it)))
         (gnus-message 5 "`nndiscourse-deregister-process': deregistering %s %s pid=%s"
                       server (process-name proc) (process-id proc))
         (delete-process proc)))
-  (setf (alist-get server nndiscourse-processes nil nil #'equal) nil))
+  (setf (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal) nil))
 
 (deffoo nndiscourse-close-server (&optional server _defs)
   "Patterning after nnimap.el."
