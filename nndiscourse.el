@@ -122,7 +122,7 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
   (declare (indent defun))
   (unless (stringp string)
-    (setq string (format "%s" string)))
+    (setq string (prin1-to-string string)))
   (let* ((capture (nndiscourse--gethash string hashtable))
          (replace-with (funcall func capture)))
     (if (fboundp 'gnus-sethash)
