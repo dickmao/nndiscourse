@@ -126,7 +126,7 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   (let* ((capture (nndiscourse--gethash string hashtable))
          (replace-with (funcall func capture)))
     (if (fboundp 'gnus-sethash)
-       (set (intern string hashtable) replace-with)
+        (set (intern string hashtable) replace-with)
       (puthash string replace-with hashtable))))
 
 (defmacro nndiscourse--sethash (string value hashtable)
@@ -221,7 +221,7 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 (defvar-local nndiscourse--refs-hashtb (gnus-make-hashtable)
   "Id -> parent.  Buffer-local to individual servers' proc buffer.")
 
-(defun nndiscourse-get-ref (server id)
+(defun nndiscourse-get-refs (server id)
   "Amongst SERVER refs, return list of descending ancestors for ID."
   (declare (indent defun))
   (with-current-buffer (nndiscourse--server-buffer server)
@@ -649,6 +649,13 @@ Originally written by Paul Issartel."
                                 (= post-number* (plist-get plst :post_number))))))))
     (elt headers found)))
 
+(defun nndiscourse--earliest-header (server group topic-id)
+  "O(n) search for first header satisfying SERVER GROUP TOPIC-ID."
+  (declare (indent defun))
+  (-when-let* ((headers (nndiscourse-get-headers server group)))
+    (seq-find (lambda (plst) (= topic-id (plist-get plst :topic_id)))
+              headers)))
+
 (defsubst nndiscourse-hash-count (table-or-obarray)
   "Return number items in TABLE-OR-OBARRAY."
   (let ((result 0))
@@ -688,13 +695,18 @@ Originally written by Paul Issartel."
                     (full-group (gnus-group-full-name
                                  group
                                  (cons 'nndiscourse (list server)))))
-         (when-let ((parent-number (plist-get plst :reply_to_post_number)))
-           (nndiscourse-set-ref server
-                                (plist-get plst :id)
-                                (plist-get (nndiscourse--number-to-header
-                                             server group (plist-get plst :topic_id)
-                                             parent-number)
-                                           :id)))
+         (aif (plist-get plst :reply_to_post_number)
+             (nndiscourse-set-ref server
+                                  (plist-get plst :id)
+                                  (plist-get (nndiscourse--number-to-header
+                                               server group
+                                               (plist-get plst :topic_id) it)
+                                             :id))
+           (awhen (plist-get (nndiscourse--earliest-header
+                               server group
+                               (plist-get plst :topic_id))
+                             :id)
+             (nndiscourse-set-ref server (plist-get plst :id) it)))
          (nndiscourse--replace-hash type (lambda (x) (1+ (or x 0))) counts)
          (if-let ((info (gnus-get-info full-group)))
              (progn
@@ -742,7 +754,7 @@ Originally written by Paul Issartel."
 (defsubst nndiscourse--make-references (server id)
   "For SERVER, construct a space delimited string of message ancestors of ID."
   (mapconcat (lambda (ref) (nndiscourse--make-message-id ref))
-             (nndiscourse-get-ref server id) " "))
+             (nndiscourse-get-refs server id) " "))
 
 (defsubst nndiscourse--make-header (server group article-number)
   "Construct mail headers from article header.
@@ -797,7 +809,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
            "Score: " score "\n"
            "\n")
           (-when-let*
-              ((parent (plist-get header :parent))
+              ((parent (car (last (nndiscourse-get-refs server (plist-get header :id)))))
                (parent-author
                 (or (plist-get (nndiscourse--get-header server group parent)
                                :username)
@@ -1110,75 +1122,75 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
   "Override `mm-with-part' massaging message from HANDLE then executing FORMS."
   `(let* ((handle ,handle))
      (when (and (mm-handle-buffer handle)
-		(buffer-name (mm-handle-buffer handle)))
+                (buffer-name (mm-handle-buffer handle)))
        (with-temp-buffer
          (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters
                                                    (mm-handle-buffer handle)))
-	 (insert-buffer-substring (mm-handle-buffer handle))
-	 (mm-decode-content-transfer-encoding
-	  (mm-handle-encoding handle)
-	  (mm-handle-media-type handle))
-	 ,@forms))))
+         (insert-buffer-substring (mm-handle-buffer handle))
+         (mm-decode-content-transfer-encoding
+          (mm-handle-encoding handle)
+          (mm-handle-media-type handle))
+         ,@forms))))
 
 (defun nndiscourse-shr (handle)
   "Override `mm-shr' for HANDLE."
   (require 'shr)
   (let ((shr-width (if shr-use-fonts
-		       nil
-		     fill-column))
-	(shr-content-function (lambda (id)
-				(let ((handle (mm-get-content-id id)))
-				  (when handle
-				    (nndiscourse-with-part handle
-				      (buffer-string))))))
-	(shr-inhibit-images mm-html-inhibit-images)
-	(shr-blocked-images mm-html-blocked-images)
-	charset coding char document)
+                       nil
+                     fill-column))
+        (shr-content-function (lambda (id)
+                                (let ((handle (mm-get-content-id id)))
+                                  (when handle
+                                    (nndiscourse-with-part handle
+                                                           (buffer-string))))))
+        (shr-inhibit-images mm-html-inhibit-images)
+        (shr-blocked-images mm-html-blocked-images)
+        charset coding char document)
     (nndiscourse-with-part (or handle (setq handle (mm-dissect-buffer t)))
       (setq case-fold-search t)
       (or (setq charset
-		(mail-content-type-get (mm-handle-type handle) 'charset))
-	  (progn
-	    (goto-char (point-min))
-	    (and (re-search-forward "\
+                (mail-content-type-get (mm-handle-type handle) 'charset))
+          (progn
+            (goto-char (point-min))
+            (and (re-search-forward "\
 <meta\\s-+http-equiv=[\"']?content-type[\"']?\\s-+content=[\"']?\
 text/html;\\s-*charset=\\([^\t\n\r \"'>]+\\)[^>]*>" nil t)
-		 (setq coding (mm-charset-to-coding-system (match-string 1)
-							   nil t))))
-	  (setq charset mail-parse-charset))
+                 (setq coding (mm-charset-to-coding-system (match-string 1)
+                                                           nil t))))
+          (setq charset mail-parse-charset))
       (when (and (or coding
-		     (setq coding (mm-charset-to-coding-system charset nil t)))
-		 (not (eq coding 'ascii)))
-	(insert (prog1
-		    (decode-coding-string (buffer-string) coding)
-		  (erase-buffer)
-		  (set-buffer-multibyte t))))
+                     (setq coding (mm-charset-to-coding-system charset nil t)))
+                 (not (eq coding 'ascii)))
+        (insert (prog1
+                    (decode-coding-string (buffer-string) coding)
+                  (erase-buffer)
+                  (set-buffer-multibyte t))))
       (goto-char (point-min))
       (while (re-search-forward
-	      "&#\\(?:x\\([89][0-9a-f]\\)\\|\\(1[2-5][0-9]\\)\\);" nil t)
-	(when (setq char
-		    (cdr (assq (if (match-beginning 1)
-				   (string-to-number (match-string 1) 16)
-				 (string-to-number (match-string 2)))
-			       mm-extra-numeric-entities)))
-	  (replace-match (char-to-string char))))
+              "&#\\(?:x\\([89][0-9a-f]\\)\\|\\(1[2-5][0-9]\\)\\);" nil t)
+        (when (setq char
+                    (cdr (assq (if (match-beginning 1)
+                                   (string-to-number (match-string 1) 16)
+                                 (string-to-number (match-string 2)))
+                               mm-extra-numeric-entities)))
+          (replace-match (char-to-string char))))
       ;; Remove "soft hyphens".
       (goto-char (point-min))
       (while (search-forward "­" nil t)
-	(replace-match "" t t))
+        (replace-match "" t t))
       (setq document (libxml-parse-html-region (point-min) (point-max))))
     (save-restriction
       (narrow-to-region (point) (point))
       (shr-insert-document document)
       (unless (bobp)
-	(insert "\n"))
+        (insert "\n"))
       (mm-handle-set-undisplayer
        handle
        (let ((min (point-min-marker))
              (max (point-max-marker)))
          (lambda ()
-	   (let ((inhibit-read-only t))
-	     (delete-region min max))))))))
+           (let ((inhibit-read-only t))
+             (delete-region min max))))))))
 
 (setf (alist-get 'shr mm-text-html-renderer-alist) 'nndiscourse-shr)
 
