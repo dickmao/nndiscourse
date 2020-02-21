@@ -799,12 +799,14 @@ article header.  Gnus manual does say the term `header` is oft conflated."
         (when body
           (insert
            "Newsgroups: " group "\n"
-           "Subject: " (mail-header-subject mail-header)  "\n"
+           "Subject: " (mail-header-subject mail-header) "\n"
            "From: " (or (mail-header-from mail-header) "nobody") "\n"
            "Date: " (mail-header-date mail-header) "\n"
            "Message-ID: " (mail-header-id mail-header) "\n"
            "References: " (mail-header-references mail-header) "\n"
            (format "Content-Type: text/html; charset=%s" nndiscourse-charset) "\n"
+           "Content-Disposition: inline" "\n"
+           "Content-Transfer-Encoding: base64" "\n"
            "Archived-at: " permalink "\n"
            "Score: " score "\n"
            "\n")
@@ -820,6 +822,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
                               :cooked))))
             (insert (nndiscourse--citation-wrap parent-author parent-body)))
           (insert body)
+          (message-encode-message-body)
           (cons group article-number))))))
 
 (deffoo nndiscourse-retrieve-headers (article-numbers &optional group server _fetch-old)
@@ -1107,92 +1110,6 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
                                                 (equal (car method) "nndiscourse"))
                                               gnus-valid-select-methods))
 (gnus-declare-backend "nndiscourse" 'post-mail 'address)
-
-;; correct what I perceive to be a bug
-;; (and prevents multibyte Chinese characters from displaying)
-(require 'mm-decode)
-
-(defvar shr-blocked-images)
-(defvar shr-use-fonts)
-(defvar shr-width)
-(defvar shr-content-function)
-(defvar shr-inhibit-images)
-
-(defmacro nndiscourse-with-part (handle &rest forms)
-  "Override `mm-with-part' massaging message from HANDLE then executing FORMS."
-  `(let* ((handle ,handle))
-     (when (and (mm-handle-buffer handle)
-                (buffer-name (mm-handle-buffer handle)))
-       (with-temp-buffer
-         (set-buffer-multibyte (buffer-local-value 'enable-multibyte-characters
-                                                   (mm-handle-buffer handle)))
-         (insert-buffer-substring (mm-handle-buffer handle))
-         (mm-decode-content-transfer-encoding
-          (mm-handle-encoding handle)
-          (mm-handle-media-type handle))
-         ,@forms))))
-
-(defun nndiscourse-shr (handle)
-  "Override `mm-shr' for HANDLE."
-  (require 'shr)
-  (let ((shr-width (if shr-use-fonts
-                       nil
-                     fill-column))
-        (shr-content-function (lambda (id)
-                                (let ((handle (mm-get-content-id id)))
-                                  (when handle
-                                    (nndiscourse-with-part handle
-                                                           (buffer-string))))))
-        (shr-inhibit-images mm-html-inhibit-images)
-        (shr-blocked-images mm-html-blocked-images)
-        charset coding char document)
-    (nndiscourse-with-part (or handle (setq handle (mm-dissect-buffer t)))
-      (setq case-fold-search t)
-      (or (setq charset
-                (mail-content-type-get (mm-handle-type handle) 'charset))
-          (progn
-            (goto-char (point-min))
-            (and (re-search-forward "\
-<meta\\s-+http-equiv=[\"']?content-type[\"']?\\s-+content=[\"']?\
-text/html;\\s-*charset=\\([^\t\n\r \"'>]+\\)[^>]*>" nil t)
-                 (setq coding (mm-charset-to-coding-system (match-string 1)
-                                                           nil t))))
-          (setq charset mail-parse-charset))
-      (when (and (or coding
-                     (setq coding (mm-charset-to-coding-system charset nil t)))
-                 (not (eq coding 'ascii)))
-        (insert (prog1
-                    (decode-coding-string (buffer-string) coding)
-                  (erase-buffer)
-                  (set-buffer-multibyte t))))
-      (goto-char (point-min))
-      (while (re-search-forward
-              "&#\\(?:x\\([89][0-9a-f]\\)\\|\\(1[2-5][0-9]\\)\\);" nil t)
-        (when (setq char
-                    (cdr (assq (if (match-beginning 1)
-                                   (string-to-number (match-string 1) 16)
-                                 (string-to-number (match-string 2)))
-                               mm-extra-numeric-entities)))
-          (replace-match (char-to-string char))))
-      ;; Remove "soft hyphens".
-      (goto-char (point-min))
-      (while (search-forward "­" nil t)
-        (replace-match "" t t))
-      (setq document (libxml-parse-html-region (point-min) (point-max))))
-    (save-restriction
-      (narrow-to-region (point) (point))
-      (shr-insert-document document)
-      (unless (bobp)
-        (insert "\n"))
-      (mm-handle-set-undisplayer
-       handle
-       (let ((min (point-min-marker))
-             (max (point-max-marker)))
-         (lambda ()
-           (let ((inhibit-read-only t))
-             (delete-region min max))))))))
-
-(setf (alist-get 'shr mm-text-html-renderer-alist) 'nndiscourse-shr)
 
 (provide 'nndiscourse)
 
