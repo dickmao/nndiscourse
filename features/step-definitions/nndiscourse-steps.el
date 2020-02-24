@@ -4,7 +4,8 @@
 
 (When "^prospective unreads for \"\\(.+\\)\" is \\([.0-9]+\\)$"
       (lambda (group count)
-        (should (= (string-to-number count) (length gnus-newsgroup-unreads)))))
+        (when (< emacs-major-version 27)
+          (should (= (string-to-number count) (length gnus-newsgroup-unreads))))))
 
 (When "^I should be in buffer like \"\\(.+\\)\"$"
       (lambda (prefix)

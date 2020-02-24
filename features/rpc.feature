@@ -10,6 +10,7 @@ Scenario: install
   And I press "RET"
   And I switch to buffer "*Article nndiscourse+meta.discourse.org:bug*"
   Then I should see "Recent Changes"
+  And prospective unreads for "nndiscourse+meta.discourse.org:bug" is 1
   And I switch to buffer "*Summary nndiscourse+meta.discourse.org:bug*"
   And I press "q"
   Then of-record unreads for "nndiscourse+meta.discourse.org:bug" is 1
