@@ -23,22 +23,25 @@
 (add-to-list 'gnus-secondary-select-methods '(nndiscourse "emacs-china.org" (nndiscourse-scheme "https")))
 
 (let ((server "emacs-china.org"))
+  (nndiscourse-open-server server)
   (seq-filter (lambda (raw) (cl-search "emacs" (cdr raw)))
               (seq-map (lambda (x) (cons (plist-get x :raw) (plist-get x :topic_title)))
                        (nndiscourse-get-posts server))))
 
 (let* ((server "emacs-china.org")
        (group "emacs")
-       (headers (nndiscourse-get-headers server)))
+       (headers (nndiscourse-get-headers server group)))
+  (nndiscourse-open-server server)
   (cons (nndiscourse--first-article-number server group)
         (nndiscourse--last-article-number server group))
-  (nndiscourse--get-header server 72124))
+  (nndiscourse--get-header server group 72124))
 
 (let ((nntp-server-buffer (get-buffer-create "foo")))
   (nndiscourse-request-list "emacs-china.org"))
 
 (let ((server "emacs-china.org")
       result)
+  (nndiscourse-open-server server)
   (with-current-buffer (nndiscourse--server-buffer server)
     (mapatoms (lambda (k)
                 (push (nndiscourse-get-category server k) result))
@@ -48,6 +51,7 @@
 (let ((server "emacs-china.org")
       (nndiscourse--last-id nil)
       (group "emacs"))
+  (nndiscourse-open-server server)
   (with-current-buffer (nndiscourse--server-buffer server)
     (mapatoms (lambda (k)
                 (nndiscourse-set-headers server k nil))
@@ -58,6 +62,7 @@
 (nndiscourse-get-headers "emacs-china.org" "emacs")
 
 (let ((server "emacs-china.org"))
+  (nndiscourse-open-server server)
   (nndiscourse--incoming server)
   (length (nndiscourse-get-headers server "emacs")))
 
@@ -554,3 +559,18 @@ START and END delimit region to propertize."
 ;; Unless the discourse server has turned off CSRF checking, posting from a third-party desktop app seems hard. I’m not about to emulate a browser.
 
 ;; which see ~/discourse_api/gem-transcript{,2}
+
+(with-temp-buffer
+  (let ((html "<p>最近也想尝试,但是感觉蛮难的,比如不知道如何在"))
+    (insert
+     "Subject: " "foo" "\n"
+     "From: " "nobody" "\n"
+     "\n")
+    (mml-insert-multipart "alternative")
+    ;;    (mml-insert-empty-tag 'part 'type "text/html")
+    (mml-insert-part "text/html")
+    (insert html)
+    (insert "\n")
+    (when (mml-validate)
+      (message-encode-message-body))
+    (buffer-string)))

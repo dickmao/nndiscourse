@@ -57,9 +57,6 @@
 (defvoo nndiscourse-scheme "https"
   "URI scheme for address.")
 
-(defvoo nndiscourse-charset "utf-8"
-  "Charset for address.")
-
 (defcustom nndiscourse-render-post t
   "If non-nil, follow link upon `gnus-summary-select-article'.
 Otherwise, just display link."
@@ -804,12 +801,11 @@ article header.  Gnus manual does say the term `header` is oft conflated."
            "Date: " (mail-header-date mail-header) "\n"
            "Message-ID: " (mail-header-id mail-header) "\n"
            "References: " (mail-header-references mail-header) "\n"
-           (format "Content-Type: text/html; charset=%s" nndiscourse-charset) "\n"
-           "Content-Disposition: inline" "\n"
-           "Content-Transfer-Encoding: base64" "\n"
            "Archived-at: " permalink "\n"
            "Score: " score "\n"
            "\n")
+          (mml-insert-multipart "alternative")
+          (mml-insert-part "text/html")
           (-when-let*
               ((parent (car (last (nndiscourse-get-refs server (plist-get header :id)))))
                (parent-author
@@ -822,7 +818,11 @@ article header.  Gnus manual does say the term `header` is oft conflated."
                               :cooked))))
             (insert (nndiscourse--citation-wrap parent-author parent-body)))
           (insert body)
-          (message-encode-message-body)
+          (insert "\n")
+          (if (mml-validate)
+              (message-encode-message-body)
+            (gnus-message 2 "nndiscourse-request-article: Invalid mml:\n%s"
+                          (buffer-string)))
           (cons group article-number))))))
 
 (deffoo nndiscourse-retrieve-headers (article-numbers &optional group server _fetch-old)
