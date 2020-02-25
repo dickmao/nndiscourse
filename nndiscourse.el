@@ -805,7 +805,10 @@ article header.  Gnus manual does say the term `header` is oft conflated."
            "Score: " score "\n"
            "\n")
           (mml-insert-multipart "alternative")
-          (mml-insert-part "text/html")
+          (mml-insert-tag 'part 'type "text/html"
+                          'disposition "inline"
+                          'charset "utf-8")
+          (save-excursion (mml-insert-tag '/part))
           (-when-let*
               ((parent (car (last (nndiscourse-get-refs server (plist-get header :id)))))
                (parent-author
