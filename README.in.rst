@@ -16,6 +16,11 @@
 .. |---| unicode:: U+2014  .. em dash, trimming surrounding whitespace
    :trim:
 
+Requirements
+============
+ .. rbenv: https://github.com/rbenv/rbenv
+ .. rbenv.el: https://github.com/senny/rbenv.el
+      
 Install
 =======
 As described in `Getting started`_, ensure melpa's whereabouts in ``init.el`` or ``.emacs``::
