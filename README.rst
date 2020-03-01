@@ -1,6 +1,5 @@
 |build-status|
 
-A Gnus backend for Discourse.
 
 .. |build-status|
    image:: https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg
@@ -15,6 +14,16 @@ A Gnus backend for Discourse.
 .. |--| unicode:: U+2013   .. en dash
 .. |---| unicode:: U+2014  .. em dash, trimming surrounding whitespace
    :trim:
+
+Requirements
+============
+ - `rbenv`_
+ - `rbenv.el`_
+ - `bundler`_
+
+ .. _rbenv: https://github.com/rbenv/rbenv
+ .. _rbenv.el: https://github.com/senny/rbenv.el
+ .. _bundler: https://bundler.io/
 
 Install
 =======

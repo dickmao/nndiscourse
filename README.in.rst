@@ -20,12 +20,12 @@ Requirements
 ============
  - `rbenv`_
  - `rbenv.el`_
- - `bunlder`_
-   
+ - `bundler`_
+
  .. _rbenv: https://github.com/rbenv/rbenv
  .. _rbenv.el: https://github.com/senny/rbenv.el
  .. _bundler: https://bundler.io/
- 
+
 Install
 =======
 As described in `Getting started`_, ensure melpa's whereabouts in ``init.el`` or ``.emacs``::
