@@ -27,7 +27,6 @@ Then
 ::
 
    M-x package-refresh-contents RET
-   M-x package-initialize RET
    M-x package-install RET nndiscourse RET
 
 Alternatively, directly clone this repo and ``make install``.
