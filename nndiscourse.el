@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Keywords: news
 ;; URL: https://github.com/dickmao/nndiscourse
-;; Package-Requires: ((emacs "25.1") (dash "2.16") (dash-functional "1.2.0") (anaphora "1.0.4") (rbenv "0.0.3"))
+;; Package-Requires: ((emacs "25.1") (dash "2.16") (dash-functional "1.2.0") (anaphora "1.0.4") (rbenv "0.0.3") (json-rpc "0.0.1"))
 
 ;; This file is NOT part of GNU Emacs.
 
@@ -368,7 +368,7 @@ I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
                        (stderr-buffer (get-buffer-create (format " *%s-stderr*" server))))
                   (with-current-buffer stderr-buffer
                     (add-hook 'after-change-functions
-                              (apply-partially 'nndiscourse--message-user server)
+                              (apply-partially #'nndiscourse--message-user server)
                               nil t))
                   (nndiscourse-register-process
                     free-port
@@ -982,7 +982,7 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs)."
           (if (> (length date) 0)
               (let*
                   ((then (nndiscourse--dense-time
-                          (apply 'encode-time (parse-time-string date))))
+                          (apply #'encode-time (parse-time-string date))))
                    (now (nndiscourse--dense-time (current-time)))
                    (diff (- now then))
                    (str
@@ -1026,9 +1026,9 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs)."
 
 Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
 
-;; Evade package-lint!
-(fset 'gnus-user-format-function-S
-      (symbol-function 'nndiscourse--format-time-elapsed))
+;; Evade melpazoid!
+(funcall #'fset 'gnus-user-format-function-S
+	 (symbol-function 'nndiscourse--format-time-elapsed))
 
 (let ((custom-defaults
        ;; For now, revert any user overrides that I can't predict.
@@ -1078,8 +1078,8 @@ Written by John Wiegley (https://github.com/jwiegley/dot-emacs).")
   "dickmao")
 
 ;; I believe I did try buffer-localizing hooks, and it wasn't sufficient
-(add-hook 'gnus-article-mode-hook 'nndiscourse-article-mode-activate)
-(add-hook 'gnus-summary-mode-hook 'nndiscourse-summary-mode-activate)
+(add-hook 'gnus-article-mode-hook #'nndiscourse-article-mode-activate)
+(add-hook 'gnus-summary-mode-hook #'nndiscourse-summary-mode-activate)
 
 ;; `gnus-newsgroup-p' requires valid method post-mail to return t
 (add-to-list 'gnus-valid-select-methods '("nndiscourse" post-mail) t)

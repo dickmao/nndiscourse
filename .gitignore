@@ -11,3 +11,4 @@ tests/Mail
 tests/News
 tests/.newsrc
 .ecukes*
+melpazoid-master
