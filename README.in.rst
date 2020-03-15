@@ -29,6 +29,8 @@ Then
    M-x package-refresh-contents RET
    M-x package-install RET nndiscourse RET
 
+You will also need Bundler_ for Ruby, and ensure ``M-: (executable-find "bundler")`` returns non-nil.
+
 Alternatively, directly clone this repo and ``make install``.
 
 Also see Troubleshooting_.
@@ -67,3 +69,4 @@ Clone this repo.  Then install Cask_.  Then try ``make test-run-interactive``.
 
 .. _Cask: https://cask.readthedocs.io/en/latest/guide/installation.html
 .. _Getting started: http://melpa.org/#/getting-started
+.. _Bundler: https://bundler.io
