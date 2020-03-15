@@ -15,20 +15,14 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         emacs_version: [25.1, 26.3]
         ruby_version: [2.6]
-        include:
-          - emacs_version: 24.1
-            lint_ignore: 1
-          - emacs_version: 24.2
-            lint_ignore: 1
-    env:
-      EMACS_LINT_IGNORE: ${{ matrix.lint_ignore }}
+        python_version: [3.6]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v1
 
     - uses: actions/setup-python@v1
       with:
-        python-version: 3.6
+        python-version: ${{ matrix.python_version }}
 
     - uses: actions/setup-ruby@v1
       with:
@@ -116,4 +110,5 @@ jobs:
 
     - name: test
       run: |
+        make test-run
         make test

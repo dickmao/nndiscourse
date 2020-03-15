@@ -57,6 +57,11 @@
 (defvoo nndiscourse-scheme "https"
   "URI scheme for address.")
 
+(defcustom nndiscourse-test-dir nil
+  "Test bundler install from here (see Makefile)."
+  :type 'directory
+  :group 'nndiscourse)
+
 (defcustom nndiscourse-render-post t
   "If non-nil, follow link upon `gnus-summary-select-article'.
 Otherwise, just display link."
@@ -315,9 +320,10 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
   "Run `bundle install` if necessary."
   (let ((default-directory
           (expand-file-name "nndiscourse"
-                            (file-name-directory
-                             (or (locate-library "nndiscourse")
-                                 default-directory))))
+			    (or nndiscourse-test-dir
+				(file-name-directory
+				 (or (locate-library "nndiscourse")
+				     default-directory)))))
         (bundle-exec (executable-find "bundle")))
     (unless bundle-exec
       (error "`nndiscourse--initialize': nndiscourse requires bundler"))
@@ -374,9 +380,10 @@ I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
                     free-port
                     (let ((default-directory
                             (expand-file-name "nndiscourse"
-                                              (file-name-directory
-                                               (or (locate-library "nndiscourse")
-                                                   default-directory)))))
+					      (or nndiscourse-test-dir
+						  (file-name-directory
+						   (or (locate-library "nndiscourse")
+						       default-directory))))))
                       (let ((new-proc (make-process :name server
                                                     :buffer proc-buf
                                                     :command ruby-command
@@ -716,9 +723,10 @@ Originally written by Paul Issartel."
                  (when (<= (car gap) (cdr gap))
                    (setf (gnus-info-read info)
                          (gnus-range-add (gnus-info-read info) (gnus-range-normalize gap)))
-                   (setf (alist-get 'unexist (gnus-info-marks info))
-                         (gnus-range-add (alist-get 'unexist (gnus-info-marks info))
-                                         (gnus-range-normalize gap))))))
+		   (when (gnus-info-marks info)
+		     (setf (alist-get 'unexist (gnus-info-marks info))
+			   (gnus-range-add (alist-get 'unexist (gnus-info-marks info))
+					   (gnus-range-normalize gap)))))))
            (gnus-message 3 "nndiscourse--incoming: cannot update read for %s" group))
          (nndiscourse-set-headers server group
            (nconc (nndiscourse-get-headers server group) (list plst)))))
@@ -966,6 +974,19 @@ article header.  Gnus manual does say the term `header` is oft conflated."
              (gnus-article-prepare article all-headers))
          (error (error-message-string err))))))
   "In case of shr failures, dump original link.")
+
+(defun nndiscourse-dump-diagnostics (server)
+  "Makefile recipe test-run.  SERVER second element of `gnus-select-method'."
+  (aif (nndiscourse-alist-get server nndiscourse-processes nil nil #'equal)
+      (dolist (b `(,byte-compile-log-buffer
+		   ,gnus-group-buffer
+		   "*Messages*"
+		   ,(buffer-name (process-buffer (nndiscourse-proc-info-process it)))
+		   ,(format " *%s-stderr*" server)))
+	(when (buffer-live-p (get-buffer b))
+	  (princ (format "\nBuffer: %s\n%s\n\n" b (with-current-buffer b (buffer-string)))
+		 #'external-debugging-output)))
+    (error "Server %s not found among %s" server (mapcar #'car nndiscourse-processes))))
 
 (defsubst nndiscourse--dense-time (time)
   "Convert TIME to a floating point number.

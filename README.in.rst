@@ -29,7 +29,7 @@ Then
    M-x package-refresh-contents RET
    M-x package-install RET nndiscourse RET
 
-You will also need Bundler_ for Ruby, and ensure ``M-: (executable-find "bundler")`` returns non-nil.
+You will also need Bundler_ for Ruby.
 
 Alternatively, directly clone this repo and ``make install``.
 

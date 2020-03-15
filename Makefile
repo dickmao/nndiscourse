@@ -46,29 +46,34 @@ test-compile: cask autoloads
 	sh -e tools/package-lint.sh ./nndiscourse.el
 	! ($(CASK) eval "(let ((byte-compile-error-on-warn t)) (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):") ; (ret=$$? ; $(CASK) clean-elc && exit $$ret)
 
+TESTFILES = $(shell $(CASK) files)
+
 define TESTRUN
 --eval "(custom-set-variables \
-  (quote (gnus-select-method (quote (nndiscourse \"\")))) \
-  (backquote (venv-location ,(file-name-as-directory (make-temp-file \"testrun-\" t)))) \
-  (quote (gnus-verbose 8)) \
-  (quote (nndiscourse-log-rpc t)))" \
+  (backquote (nndiscourse-test-dir ,(file-name-as-directory (make-temp-file \"testrun-\" t)))) \
+  (quote (gnus-select-method (quote (nndiscourse \"meta.discourse.org\" (nndiscourse-scheme \"https\"))))) \
+  (quote (gnus-verbose 8)))" \
 --eval "(setq debug-on-error t)" \
---eval "(fset (quote gnus-y-or-n-p) (function ignore))"
+--eval "(fset (quote gnus-y-or-n-p) (function ignore))" \
+--eval "(dolist (f (mapcar (function symbol-name) (quote ($(TESTFILES))))) \
+  (let* ((parent (file-name-directory f)) \
+         (dest (concat (file-name-as-directory nndiscourse-test-dir) (or parent \".\")))) \
+    (make-directory dest t) \
+    (funcall (if (file-directory-p f) (function copy-directory) (function copy-file)) f (concat (file-name-as-directory dest) (file-name-nondirectory f)))))"
 endef
 
 .PHONY: test-run
 test-run:
-	$(CASK) emacs -Q --batch \
+	$(CASK) emacs -Q --batch -l nndiscourse \
 	  $(TESTRUN) \
-	  --eval "(require 'nndiscourse)" \
-	  --eval "(cl-assert (nndiscourse-rpc-get))" \
-	  --eval "(sleep-for 0 7300)" \
-	  -f nndiscourse-dump-diagnostics \
-	  --eval "(cl-assert nndiscourse-processes)"
+	  --eval "(gnus-open-server gnus-select-method)" \
+	  --eval "(sleep-for 0 4300)" \
+	  --eval "(cl-assert nndiscourse-processes)" \
+	  --eval "(nndiscourse-dump-diagnostics (nth 1 gnus-select-method))"
 
 .PHONY: test-run-interactive
 test-run-interactive:
-	$(CASK) emacs -Q \
+	$(CASK) emacs -Q -l nndiscourse \
 	  $(TESTRUN) \
 	  -f gnus
 
@@ -76,11 +81,15 @@ test-run-interactive:
 test-unit:
 	$(CASK) exec ert-runner -L . -L tests $(TESTS)
 
+.PHONY: test-clean
+test-clean:
+	rm -rf tests/.emacs* tests/.newsrc* tests/Mail tests/News tests/request tests/request-log
+
 .PHONY: test
 test: test-compile test-unit test-int
 
 .PHONY: test-int
-test-int:
+test-int: test-clean
 	rm -f tests/.newsrc.eld
 	$(CASK) exec ecukes --debug --reporter magnars
 
