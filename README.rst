@@ -3,7 +3,7 @@
 A Gnus backend for Discourse.
 
 .. |build-status|
-   image:: ![CI](https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg?branch=dev)
+   image:: https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg?branch=dev
    :target: https://github.com/dickmao/nndiscourse/actions
    :alt: Build Status
 .. |melpa-dev|
