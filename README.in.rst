@@ -3,7 +3,7 @@
 .. COMMENTARY (see Makefile)
 
 .. |build-status|
-   image:: https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg
+   image:: ![CI](https://github.com/dickmao/nndiscourse/workflows/CI/badge.svg?branch=dev)
    :target: https://github.com/dickmao/nndiscourse/actions
    :alt: Build Status
 .. |melpa-dev|
