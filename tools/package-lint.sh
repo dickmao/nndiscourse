@@ -1,7 +1,7 @@
 #!/bin/sh -ex
 
-EMACS="${EMACS:=emacs}"
-BASENAME=$(basename "$1")
+export EMACS="${EMACS:=emacs}"
+export BASENAME=$(basename "$1")
 
 ( cask emacs -Q --batch \
            --visit "$1" \

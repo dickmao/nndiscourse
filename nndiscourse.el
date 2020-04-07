@@ -724,9 +724,7 @@ Originally written by Paul Issartel."
                    (setf (gnus-info-read info)
                          (gnus-range-add (gnus-info-read info) (gnus-range-normalize gap)))
 		   (when (gnus-info-marks info)
-		     (setf (alist-get 'unexist (gnus-info-marks info))
-			   (gnus-range-add (alist-get 'unexist (gnus-info-marks info))
-					   (gnus-range-normalize gap)))))))
+		     (setf (alist-get 'unexist (gnus-info-marks info)) nil)))))
            (gnus-message 3 "nndiscourse--incoming: cannot update read for %s" group))
          (nndiscourse-set-headers server group
            (nconc (nndiscourse-get-headers server group) (list plst)))))
