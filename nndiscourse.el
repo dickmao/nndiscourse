@@ -291,33 +291,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
           (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
             (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
                           (mapconcat (lambda (s) (format "%s" s)) args " "))
-	    (let ((json-rpc-wait-override
-		   (lambda (connection)
-		     "Mitigate cpu pegging."
-		     (let ((json-rpc-poll-max-seconds 60)
-			   (json-rpc-poll-seconds 0.5))
-		       (with-current-buffer (process-buffer (json-rpc-process connection))
-			 (unless (cl-loop repeat (max 1 (truncate (/ json-rpc-poll-max-seconds
-								     json-rpc-poll-seconds)))
-					  until (or (json-rpc--content-finished-p)
-						    (not (json-rpc-live-p connection)))
-					  do (accept-process-output nil json-rpc-poll-seconds)
-					  finally return (or (json-rpc--content-finished-p)
-							     (not (json-rpc-live-p connection))))
-			   (signal 'json-rpc-error "Timeout"))
-			 (json-rpc--move-to-content)
-			 (let* ((json-object-type 'plist)
-				(json-key-type 'keyword)
-				(result (json-read)))
-			   (if (plist-get result :error)
-			       (signal 'json-rpc-error (plist-get result :error))
-			     (plist-get result :result))))))))
-	      (add-function :override (symbol-function 'json-rpc-wait)
-			    json-rpc-wait-override)
-	      (unwind-protect
-		  (json-rpc connection method args)
-		(remove-function (symbol-function 'json-rpc-wait)
-				 json-rpc-wait-override)))))
+	    (json-rpc connection method args)))
       (error (prog1 nil
                (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))))
 
