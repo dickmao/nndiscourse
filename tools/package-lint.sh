@@ -10,11 +10,12 @@ export BASENAME=$(basename "$1")
                                                (buffer-string)))" \
            2>&1 | egrep -a "^$BASENAME:" ) && false
 
-cask emacs -Q --batch \
+!( cask emacs -Q --batch \
            -l package-lint \
            --eval "(package-initialize)" \
            --eval "(push (quote (\"melpa\" . \"http://melpa.org/packages/\")) \
                          package-archives)" \
            --eval "(package-refresh-contents)" \
            --eval "(setq debug-on-error t)" \
-           -f package-lint-batch-and-exit "$1"
+           -f package-lint-batch-and-exit "$1" \
+      2>&1 | egrep -a "^$BASENAME:" | egrep -v "non-snapshot" | egrep .)
