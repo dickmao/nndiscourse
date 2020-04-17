@@ -3,7 +3,7 @@
 EMACS="${EMACS:=emacs}"
 BASENAME=$(basename "$1")
 PYTHON=$(which python3.6)
-PYTHON="${PYTHON:=python}"
+PYTHON="${PYTHON:-python}"
 
 if [[ -z $(du -s melpazoid-master 2>/dev/null | cut -f1) ]] || \
        [[ $(du -s melpazoid-master 2>/dev/null | cut -f1) -le "100" ]] ; then
@@ -24,4 +24,5 @@ cd melpazoid-master
 ${PYTHON} -m pip install --user -U .
 sed -i -e 's/ -it / -i /' Makefile
 sed -i -e 's/ -ti / -i /' Makefile
-PKG_PATH=${PKG_PATH} PKG_NAME=${PKG_NAME} make run
+if [ ! -s ./python ]; then rm -f ./python ; ln -s $PYTHON ./python ; fi
+PKG_PATH=${PKG_PATH} PKG_NAME=${PKG_NAME} PATH=.:${PATH} make run

@@ -103,11 +103,6 @@ jobs:
         sh tools/install-cask.sh
         cask link list
 
-    - name: melpazoid
-      if: startsWith(runner.os, 'Linux')
-      run: |
-        bash tools/melpazoid.sh
-
     - name: test
       run: |
         make test-run
