@@ -666,6 +666,18 @@ Originally written by Paul Issartel."
     (nndiscourse--maphash (lambda (&rest _args) (cl-incf result)) table-or-obarray)
     result))
 
+(defsubst nndiscourse-hash-values (table-or-obarray)
+  "Return right hand sides in TABLE-OR-OBARRAY."
+  (let (result)
+    (nndiscourse--maphash (lambda (_key value) (push value result)) table-or-obarray)
+    result))
+
+(defsubst nndiscourse-hash-keys (table-or-obarray)
+  "Return left hand sides in TABLE-OR-OBARRAY."
+  (let (result)
+    (nndiscourse--maphash (lambda (key _value) (push key result)) table-or-obarray)
+    result))
+
 (defun nndiscourse--incoming (server)
   "Drink from the SERVER firehose."
   (interactive)
@@ -866,23 +878,24 @@ article header.  Gnus manual does say the term `header` is oft conflated."
     'active))
 
 (deffoo nndiscourse-request-list (&optional server)
-  (let (groups)
+  (let ((groups (nndiscourse-hash-values nndiscourse--categories-hashtb)))
     (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
       (with-current-buffer nntp-server-buffer
-        (mapc
-         (lambda (plst)
-           (let* ((group (plist-get plst :slug))
-                  (category-id (plist-get plst :id))
-                  (full-name (gnus-group-full-name group `(nndiscourse ,server))))
-             (erase-buffer)
-             ;; only `gnus-activate-group' seems to call `gnus-parse-active'
-             (unless (gnus-get-info full-name)
-               (gnus-activate-group full-name nil nil `(nndiscourse ,server))
-               (gnus-group-unsubscribe-group full-name
-                                             gnus-level-default-subscribed t))
-             (nndiscourse-set-category server category-id group)
-             (push group groups)))
-         (nndiscourse-get-categories server))
+	(unless groups
+	  (mapc
+	   (lambda (plst)
+	     (let* ((group (plist-get plst :slug))
+		    (category-id (plist-get plst :id))
+		    (full-name (gnus-group-full-name group `(nndiscourse ,server))))
+	       (erase-buffer)
+	       ;; only `gnus-activate-group' seems to call `gnus-parse-active'
+	       (unless (gnus-get-info full-name)
+		 (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+		 (gnus-group-unsubscribe-group full-name
+					       gnus-level-default-subscribed t))
+	       (nndiscourse-set-category server category-id group)
+	       (push group groups)))
+	   (nndiscourse-get-categories server)))
         (erase-buffer)
         (mapc (lambda (group)
                 (insert
