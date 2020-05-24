@@ -29,6 +29,9 @@
 
 ;;; Code:
 
+(eval-when-compile (require 'cl-lib)
+                   (cl-assert (fboundp 'libxml-parse-html-region) nil
+                              "nnhackernews requires emacs built with libxml support"))
 (require 'nnoo)
 (require 'gnus)
 (require 'gnus-start)
@@ -618,7 +621,7 @@ Originally written by Paul Issartel."
                                               'utf-8))))
     (add-function :filter-return (symbol-function 'json-read-string) utf-decoder)
     (unwind-protect
-        (condition-case err  (json-rpc conn "get_post" id)
+        (condition-case err (json-rpc conn "get_post" id)
           (error (gnus-message 3 "nndiscourse--request-item: %s" (error-message-string err))
                  nil))
       (remove-function (symbol-function 'json-read-string) utf-decoder))))
