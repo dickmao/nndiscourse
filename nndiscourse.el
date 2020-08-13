@@ -149,16 +149,17 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 
 Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
   (declare (indent nil))
-  `(,(if (fboundp 'gnus-gethash-safe)
-         'mapatoms
-       'maphash)
-    ,(if (fboundp 'gnus-gethash-safe)
-         `(lambda (k) (funcall
-                       (apply-partially
-                        ,func
-                        (symbol-name k) (gnus-gethash-safe k ,table))))
-       func)
-    ,table))
+  (let ((workaround 'gnus-gethash-safe))
+    `(,(if (fboundp 'gnus-gethash-safe)
+           'mapatoms
+         'maphash)
+      ,(if (fboundp 'gnus-gethash-safe)
+           `(lambda (k) (funcall
+                         (apply-partially
+                          ,func
+                          (symbol-name k) (,workaround k ,table))))
+         func)
+      ,table)))
 
 (defvar nndiscourse-summary-voting-map
   (let ((map (make-sparse-keymap)))
