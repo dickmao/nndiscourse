@@ -326,7 +326,7 @@
 ;; eww doesn't fly for lack of javascript
 (build-query "http://localhost:3000")
 
-;; client = DiscourseApi::Client.new("localhost:3000")
+;; client = DiscourseApi::Client.new("http://localhost:3000")
 ;; client = DiscourseApi::Client.new('http://localhost:3000', 'b28f0cea1b4fb749b9a3b8683760388c', 'priapushk', 'User-Api-Key', 'User-Api-Client-Id')
 ;; proc = Nndiscourse::Process.new('http://localhost:3000', 'b28f0cea1b4fb749b9a3b8683760388c', 'priapushk')
 ;; (let ((user-api-key
