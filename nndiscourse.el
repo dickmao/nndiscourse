@@ -81,20 +81,30 @@ Otherwise, just display link."
   :type 'string
   :group 'nndiscourse)
 
-(defvoo nndiscourse-status-string "" "Out-of-band message.")
+(defvar nndiscourse-status-string "" "Out-of-band message.")
 
-(defvar nndiscourse-by-server-hashtb (gnus-make-hashtable))
+(defvar nndiscourse-by-server (gnus-make-hashtable)
+  "Various by-server data.")
 
-(defmacro nndiscourse-by-server (server key)
-  "Get generalized variable for SERVER value of KEY."
-  `(alist-get ,key (nndiscourse--gethash ,server nndiscourse-by-server-hashtb)))
+(defmacro nndiscourse-defvoo (voodoo initial server doc)
+  "Record VOODOO as a defvoo to INITIAL for SERVER with docstring DOC.
 
-(defvar nndiscourse-by-server-initial
-  `((:last-id nil)
-    (:last-scan-time ,(- (truncate (float-time)) 100))
-    (:headers-hashtb ,(gnus-make-hashtable))
-    (:refs-hashtb ,(gnus-make-hashtable))
-    (:categories-hashtb ,(gnus-make-hashtable))))
+But also, defun (concat VOODOO \"-lookup\") to a by-server lookup"
+  (declare (indent defun))
+  (let ((voodoo-lookup (intern (concat (symbol-name voodoo) "-lookup"))))
+    `(progn
+       (nndiscourse--sethash (symbol-name, voodoo) ,initial nndiscourse-by-server)
+       (defun ,voodoo-lookup (server)
+         (assq ,voodoo (nndiscourse--gethash server nndiscourse-by-server)))
+       (defvoo ,voodoo #',voodoo-lookup ,doc))))
+
+(nndiscourse-defvoo nndiscourse--last-id nil "Keep track of where we are.")
+
+(nndiscourse-defvoo nndiscourse--debug-request-posts nil
+  "Keep track of ids to re-request for testing.")
+
+(nndiscourse-defvoo nndiscourse--last-scan-time (- (truncate (float-time)) 100)
+  "Don't scan more than once every few seconds.")
 
 (defmacro nndiscourse--callback (result &optional callback)
   "Set RESULT to return value of CALLBACK."
@@ -122,23 +132,9 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
         (if (or (null sym) (not (boundp sym))) dflt (symbol-value sym)))
     (gethash string hashtable dflt)))
 
-(defmacro nndiscourse--sethash (string value hashtable)
-  "Set corresponding value of STRING to VALUE in HASHTABLE.
-
-Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
-  (declare (indent defun))
-  `(,(if (fboundp 'gnus-sethash)
-         'gnus-sethash
-       'puthash)
-    (format "%s" ,string) ,value ,hashtable))
-
-(defun nndiscourse-good-server (server)
+(defsubst nndiscourse-good-server (server)
   "SERVER needs to be a non-zero length string."
-  (or (and (stringp server) (not (zerop (length server)))
-           (prog1 t
-             (unless (nndiscourse--gethash server nndiscourse-by-server-hashtb)
-               (nndiscourse--sethash server
-                 (copy-tree nndiscourse-by-server-initial) nndiscourse-by-server-hashtb))))
+  (or (and (stringp server) (not (zerop (length server))))
       (prog1 nil (backtrace))))
 
 (defsubst nndiscourse--replace-hash (string func hashtable)
@@ -153,6 +149,16 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
     (if (fboundp 'gnus-sethash)
         (set (intern string hashtable) replace-with)
       (puthash string replace-with hashtable))))
+
+(defmacro nndiscourse--sethash (string value hashtable)
+  "Set corresponding value of STRING to VALUE in HASHTABLE.
+
+Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtables."
+  (declare (indent defun))
+  `(,(if (fboundp 'gnus-sethash)
+         'gnus-sethash
+       'puthash)
+    (format "%s" ,string) ,value ,hashtable))
 
 (defmacro nndiscourse--maphash (func table)
   "Map FUNC taking key and value over TABLE, return nil.
@@ -219,24 +225,30 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
           (get-buffer-create name)
         (get-buffer name)))))
 
+(nndiscourse-defvoo nndiscourse--headers-hashtb (gnus-make-hashtable)
+  "Group -> headers.  Buffer-local to individual servers' proc buffer.")
+
 (defsubst nndiscourse-get-headers (server group)
   "List headers for SERVER GROUP."
   (and (buffer-live-p (nndiscourse--server-buffer server))
        (with-current-buffer (nndiscourse--server-buffer server)
-         (nndiscourse--gethash group (nndiscourse-by-server server :headers-hashtb)))))
+         (nndiscourse--gethash group nndiscourse--headers-hashtb))))
 
 (defmacro nndiscourse-set-headers (server group new-headers)
   "Assign headers for SERVER GROUP to NEW-HEADERS."
   (declare (indent defun))
   `(with-current-buffer (nndiscourse--server-buffer ,server)
-     (nndiscourse--sethash ,group ,new-headers (nndiscourse-by-server server :headers-hashtb))))
+     (nndiscourse--sethash ,group ,new-headers nndiscourse--headers-hashtb)))
+
+(nndiscourse-defvoo nndiscourse--refs-hashtb (gnus-make-hashtable)
+  "Id -> parent.  Buffer-local to individual servers' proc buffer.")
 
 (defun nndiscourse-get-refs (server id)
   "Amongst SERVER refs, return list of descending ancestors for ID."
   (declare (indent defun))
   (with-current-buffer (nndiscourse--server-buffer server)
     (cl-loop for prev-id = id then cur-id
-             for cur-id = (nndiscourse--gethash prev-id (nndiscourse-by-server server :refs-hashtb))
+             for cur-id = (nndiscourse--gethash prev-id nndiscourse--refs-hashtb)
              until (not cur-id)
              collect cur-id into rresult
              finally return (nreverse rresult))))
@@ -244,19 +256,22 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
 (defmacro nndiscourse-set-ref (server id parent-id)
   "Amongst SERVER refs, associate ID to PARENT-ID."
   `(with-current-buffer (nndiscourse--server-buffer ,server)
-     (nndiscourse--sethash ,id ,parent-id (nndiscourse-by-server server :refs-hashtb))))
+     (nndiscourse--sethash ,id ,parent-id nndiscourse--refs-hashtb)))
+
+(nndiscourse-defvoo nndiscourse--categories-hashtb (gnus-make-hashtable)
+  "Category id -> group.  Buffer-local to individual servers' proc buffer.")
 
 (defun nndiscourse-get-category (server category-id)
   "Amongst SERVER categories, return group for CATEGORY-ID."
   (declare (indent defun))
   (with-current-buffer (nndiscourse--server-buffer server)
-    (nndiscourse--gethash (format "%s" category-id) (nndiscourse-by-server server :categories-hashtb))))
+    (nndiscourse--gethash (format "%s" category-id) nndiscourse--categories-hashtb)))
 
 (defmacro nndiscourse-set-category (server category-id group)
   "Amongst SERVER categories, associate CATEGORY-ID to GROUP."
   (declare (indent defun))
   `(with-current-buffer (nndiscourse--server-buffer ,server)
-     (nndiscourse--sethash ,category-id ,group (nndiscourse-by-server server :categories-hashtb))))
+     (nndiscourse--sethash ,category-id ,group nndiscourse--categories-hashtb)))
 
 (defmacro nndiscourse--with-mutex (mtx &rest body)
   "If capable of threading, lock with MTX and execute BODY."
@@ -360,7 +375,18 @@ I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
               (progn
                 ;; defs should be non-nil when called from `gnus-open-server'
                 (when defs
-                  (nndiscourse--initialize))
+                  (nndiscourse--initialize)
+                  ;; `nnoo-change-server' hackery blesses variables (perl "bless")
+                  (dolist (voodoo (mapcar #'car (nnoo-variables 'nndiscourse)))
+                    (unless (assq voodoo defs)
+                      (-when-let* ((voodoo-lookup (intern-soft (concat (symbol-name voodoo)
+                                                                     "-lookup")))
+                                   (voodoo-lookup-value (symbol-value voodoo-lookup)))
+                        (push (list voodoo (if (functionp voodoo-lookup-value)
+                                               (funcall voodoo-lookup-value)
+                                             voodoo-lookup-value))
+                              defs)))))
+                (gnus-message 5 "holy hell: %s %s" server defs)
                 (nnoo-change-server 'nndiscourse server defs)
                 (let* ((proc-buf (nndiscourse--server-buffer server t))
                        (proc (get-buffer-process proc-buf)))
@@ -619,6 +645,7 @@ Originally written by Paul Issartel."
 
 (defun nndiscourse--request-item (id server)
   "Retrieve ID from SERVER as a property list."
+  (push id nndiscourse--debug-request-posts)
   (let* ((port (nndiscourse-proc-info-port (cdr (assoc server nndiscourse-processes))))
          (conn (json-rpc-connect nndiscourse-localhost port))
          (utf-decoder (lambda (x)
@@ -693,29 +720,30 @@ Originally written by Paul Issartel."
 (defun nndiscourse--incoming (server)
   "Drink from the SERVER firehose."
   (interactive)
-  (when (zerop (nndiscourse-hash-count (nndiscourse-by-server server :categories-hashtb)))
+  (setq nndiscourse--debug-request-posts nil)
+  (when (zerop (nndiscourse-hash-count nndiscourse--categories-hashtb))
     (nndiscourse-request-list server))
-  (gnus-message 5 "holy hell: %s %s" server (nndiscourse-hash-count (nndiscourse-by-server server :categories-hashtb)))
+  (gnus-message 5 "holy hell: %s %s" server (nndiscourse-hash-count nndiscourse--categories-hashtb))
   (cl-loop
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
    for posts = (nndiscourse-get-posts server :before (1- page-bottom))
    until (null posts)
-   do (unless (nndiscourse-by-server server :last-id)
-        (setf (nndiscourse-by-server server :last-id)
+   do (unless nndiscourse--last-id
+        (setq nndiscourse--last-id
               (1- (plist-get (elt posts (1- (length posts))) :id))))
    do (cl-do* ((k 0 (1+ k))
                (plst (and (< k (length posts)) (elt posts k))
                      (and (< k (length posts)) (elt posts k))))
           ((or (null plst)
-               (<= (plist-get plst :id) (nndiscourse-by-server server :last-id))))
+               (<= (plist-get plst :id) nndiscourse--last-id)))
         (push plst new-posts))
    until (<= (1- (plist-get (elt posts (1- (length posts))) :id))
-             (nndiscourse-by-server server :last-id))
+             nndiscourse--last-id)
    finally
    (let ((counts (gnus-make-hashtable)))
      (dolist (plst new-posts)
-       (setf (nndiscourse-by-server server :last-id) (plist-get plst :id))
+       (setq nndiscourse--last-id (plist-get plst :id))
        (-when-let* ((not-deleted (not (plist-get plst :deleted_at)))
                     (type (plist-get plst :post_type))
                     (category-id (plist-get plst :category_id))
@@ -754,7 +782,7 @@ Originally written by Paul Issartel."
            (nconc (nndiscourse-get-headers server group) (list plst)))))
      (gnus-message
       5 (concat "nndiscourse--incoming: "
-                (format "last-id: %s, " (nndiscourse-by-server server :last-id))
+                (format "last-id: %s, " nndiscourse--last-id)
                 (let ((result ""))
                   (nndiscourse--maphash
                    (lambda (key value)
@@ -764,12 +792,12 @@ Originally written by Paul Issartel."
 
 (deffoo nndiscourse-request-scan (&optional _group server)
   (when (nndiscourse-good-server server)
-    (if (> 2 (- (truncate (float-time)) (nndiscourse-by-server server :last-scan-time)))
+    (if (> 2 (- (truncate (float-time)) nndiscourse--last-scan-time))
         (gnus-message 7 "nndiscourse-request-scan: last scanned at %s"
-                      (current-time-string (nndiscourse-by-server server :last-scan-time)))
+                      (current-time-string nndiscourse--last-scan-time))
       (cl-destructuring-bind (seconds num-gc seconds-gc)
           (benchmark-run (nndiscourse--incoming server))
-        (setf (nndiscourse-by-server server :last-scan-time) (truncate (float-time)))
+        (setq nndiscourse--last-scan-time (truncate (float-time)))
         (gnus-message 5 (concat "nndiscourse-request-scan: Took %s seconds,"
                                 " with %s gc runs taking %s seconds")
                       seconds num-gc seconds-gc)))))
@@ -890,7 +918,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
     'active))
 
 (deffoo nndiscourse-request-list (&optional server)
-  (let ((groups (nndiscourse-hash-values (nndiscourse-by-server server :categories-hashtb))))
+  (let ((groups (nndiscourse-hash-values nndiscourse--categories-hashtb)))
     (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
       (with-current-buffer nntp-server-buffer
 	(unless groups
