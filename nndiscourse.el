@@ -110,10 +110,14 @@ Thought I could use macros here to setf it."
   `(let ((foo (nndiscourse--gethash ,server nndiscourse-by-server-hashtb)))
      (alist-get ,key foo)))
 
+(defun nndiscourse-obarrayp (obj)
+  "Return t if OBJ is an obarray.  `obarrayp' did not exist in emacs-25."
+  (and (vectorp obj) (< 0 (length obj))))
+
 (defun nndiscourse-by-server-initial ()
   "Ensure deep copy of seed values for `nndiscourse-by-server'."
   (mapcar (lambda (x) (cons (car x)
-                            (if (obarrayp (cdr x)) (copy-sequence (cdr x))
+                            (if (nndiscourse-obarrayp (cdr x)) (copy-sequence (cdr x))
                               (if (hash-table-p (cdr x))
                                   (copy-hash-table (cdr x))
                                 (cdr x)))))
