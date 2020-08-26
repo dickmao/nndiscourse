@@ -31,7 +31,7 @@
 
 (eval-when-compile (require 'cl-lib)
                    (cl-assert (fboundp 'libxml-parse-html-region) nil
-                              "nnhackernews requires emacs built with libxml support"))
+                              "nndiscourse requires emacs built with libxml support"))
 (require 'nnoo)
 (require 'gnus)
 (require 'gnus-start)
