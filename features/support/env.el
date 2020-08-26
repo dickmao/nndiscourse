@@ -70,7 +70,8 @@
      ,@body))
 
 (Before
- (setq nndiscourse--last-scan-time 0)
+ (dolist (server (mapcar #'car nndiscourse-processes))
+   (nndiscourse-set-last-scan-time server 0))
  (setq ecukes-reporter-before-scenario-hook
        (lambda (scenario)
          (with-scenario scenario
