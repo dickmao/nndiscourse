@@ -1,4 +1,4 @@
-|build-status|
+|build-status| |melpa-dev|
 
 A Gnus backend for Discourse.
 
@@ -7,9 +7,9 @@ A Gnus backend for Discourse.
    :target: https://github.com/dickmao/nndiscourse/actions
    :alt: Build Status
 .. |melpa-dev|
-   image:: http://melpa.milkbox.net/packages/nndiscourse-badge.svg
-   :target: http://melpa.milkbox.net/#/nndiscourse
-   :alt: MELPA development version
+   image:: https://melpa.org/packages/nndiscourse-badge.svg
+   :target: http://melpa.org/#/nndiscourse
+   :alt: MELPA current version
 
 .. image:: screenshot.png
 .. |--| unicode:: U+2013   .. en dash
