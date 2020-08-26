@@ -39,12 +39,12 @@ $(CASK_DIR): Cask
 
 .PHONY: test-compile
 test-compile: cask autoloads
-	$(MAKE) -C nndiscourse $@
-	sh -e tools/package-lint.sh ./nndiscourse.el
-	! ($(CASK) eval "(let ((byte-compile-error-on-warn t)) (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):") ; (ret=$$? ; $(CASK) clean-elc && exit $$ret)
 	! ($(CASK) eval \
 	      "(cl-letf (((symbol-function (quote cask-files)) (lambda (&rest _args) (mapcar (function symbol-name) (quote ($(TESTSSRC))))))) \
 	          (let ((byte-compile-error-on-warn t)) (cask-cli/build)))" 2>&1 | egrep -a "(Warning|Error):") ; (ret=$$? ; rm -f $(ELCTESTS) && exit $$ret)
+	$(MAKE) -C nndiscourse $@
+	sh -e tools/package-lint.sh ./nndiscourse.el
+	! ($(CASK) eval "(let ((byte-compile-error-on-warn t)) (cask-cli/build))" 2>&1 | egrep -a "(Warning|Error):") ; (ret=$$? ; $(CASK) clean-elc && exit $$ret)
 
 TESTFILES = $(shell $(CASK) files)
 

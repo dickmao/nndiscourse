@@ -81,11 +81,29 @@ Otherwise, just display link."
   :type 'string
   :group 'nndiscourse)
 
-(defvoo nndiscourse-status-string "" "Out-of-band message.")
+(defvar nndiscourse-status-string "" "Out-of-band message.")
 
-(defvar-local nndiscourse--last-id nil "Keep track of where we are.")
+(defvar nndiscourse-by-server (gnus-make-hashtable)
+  "Various by-server data.")
 
-(defvar-local nndiscourse--last-scan-time (- (truncate (float-time)) 100)
+(defmacro nndiscourse-defvoo (voodoo initial server doc)
+  "Record VOODOO as a defvoo to INITIAL for SERVER with docstring DOC.
+
+But also, defun (concat VOODOO \"-lookup\") to a by-server lookup"
+  (declare (indent defun))
+  (let ((voodoo-lookup (intern (concat (symbol-name voodoo) "-lookup"))))
+    `(progn
+       (nndiscourse--sethash (symbol-name, voodoo) ,initial nndiscourse-by-server)
+       (defun ,voodoo-lookup (server)
+         (assq ,voodoo (nndiscourse--gethash server nndiscourse-by-server)))
+       (defvoo ,voodoo #',voodoo-lookup ,doc))))
+
+(nndiscourse-defvoo nndiscourse--last-id nil "Keep track of where we are.")
+
+(nndiscourse-defvoo nndiscourse--debug-request-posts nil
+  "Keep track of ids to re-request for testing.")
+
+(nndiscourse-defvoo nndiscourse--last-scan-time (- (truncate (float-time)) 100)
   "Don't scan more than once every few seconds.")
 
 (defmacro nndiscourse--callback (result &optional callback)
@@ -159,24 +177,6 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
          func)
       ,table)))
 
-(defsubst nndiscourse-hash-count (table-or-obarray)
-  "Return number items in TABLE-OR-OBARRAY."
-  (let ((result 0))
-    (nndiscourse--maphash (lambda (&rest _args) (cl-incf result)) table-or-obarray)
-    result))
-
-(defsubst nndiscourse-hash-values (table-or-obarray)
-  "Return right hand sides in TABLE-OR-OBARRAY."
-  (let (result)
-    (nndiscourse--maphash (lambda (_key value) (push value result)) table-or-obarray)
-    result))
-
-(defsubst nndiscourse-hash-keys (table-or-obarray)
-  "Return left hand sides in TABLE-OR-OBARRAY."
-  (let (result)
-    (nndiscourse--maphash (lambda (key _value) (push key result)) table-or-obarray)
-    result))
-
 (defvar nndiscourse-summary-voting-map
   (let ((map (make-sparse-keymap)))
     map)
@@ -217,42 +217,22 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   (when (nndiscourse-good-server server)
     (format " *%s*" server)))
 
-(defsubst nndiscourse--server-buffer (server)
-  "Get proc buffer for SERVER.  Create if necessary."
+(defsubst nndiscourse--server-buffer (server &optional create)
+  "Get proc buffer for SERVER.  Create if necessary if CREATE."
   (when (nndiscourse-good-server server)
     (let ((name (nndiscourse--server-buffer-name server)))
-      (get-buffer-create name))))
+      (if create
+          (get-buffer-create name)
+        (get-buffer name)))))
 
-(defvar-local nndiscourse--headers-hashtb (gnus-make-hashtable)
+(nndiscourse-defvoo nndiscourse--headers-hashtb (gnus-make-hashtable)
   "Group -> headers.  Buffer-local to individual servers' proc buffer.")
 
-(defun nndiscourse-get-last-id (server)
-  "Get last left off for SERVER."
-  (when (buffer-live-p (nndiscourse--server-buffer server))
-    (buffer-local-value 'nndiscourse--last-id (nndiscourse--server-buffer server))))
-
-(defun nndiscourse-set-last-id (server new-id)
-  "Set last left off for SERVER to NEW-ID."
-  (when (buffer-live-p (nndiscourse--server-buffer server))
-    (with-current-buffer (nndiscourse--server-buffer server)
-      (setq-local nndiscourse--last-id new-id))))
-
-(defun nndiscourse-get-last-scan-time (server)
-  "Get last scan time for SERVER."
-  (when (buffer-live-p (nndiscourse--server-buffer server))
-    (buffer-local-value 'nndiscourse--last-scan-time (nndiscourse--server-buffer server))))
-
-(defun nndiscourse-set-last-scan-time (server new-scan-time)
-  "Set last scan time for SERVER to NEW-SCAN-TIME."
-  (when (buffer-live-p (nndiscourse--server-buffer server))
-    (with-current-buffer (nndiscourse--server-buffer server)
-      (setq-local nndiscourse--last-scan-time new-scan-time))))
-
-(defun nndiscourse-get-headers (server group)
+(defsubst nndiscourse-get-headers (server group)
   "List headers for SERVER GROUP."
-  (when (buffer-live-p (nndiscourse--server-buffer server))
-    (with-current-buffer (nndiscourse--server-buffer server)
-      (nndiscourse--gethash group nndiscourse--headers-hashtb))))
+  (and (buffer-live-p (nndiscourse--server-buffer server))
+       (with-current-buffer (nndiscourse--server-buffer server)
+         (nndiscourse--gethash group nndiscourse--headers-hashtb))))
 
 (defmacro nndiscourse-set-headers (server group new-headers)
   "Assign headers for SERVER GROUP to NEW-HEADERS."
@@ -260,11 +240,12 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   `(with-current-buffer (nndiscourse--server-buffer ,server)
      (nndiscourse--sethash ,group ,new-headers nndiscourse--headers-hashtb)))
 
-(defvar-local nndiscourse--refs-hashtb (gnus-make-hashtable)
+(nndiscourse-defvoo nndiscourse--refs-hashtb (gnus-make-hashtable)
   "Id -> parent.  Buffer-local to individual servers' proc buffer.")
 
 (defun nndiscourse-get-refs (server id)
   "Amongst SERVER refs, return list of descending ancestors for ID."
+  (declare (indent defun))
   (with-current-buffer (nndiscourse--server-buffer server)
     (cl-loop for prev-id = id then cur-id
              for cur-id = (nndiscourse--gethash prev-id nndiscourse--refs-hashtb)
@@ -272,33 +253,25 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
              collect cur-id into rresult
              finally return (nreverse rresult))))
 
-(defun nndiscourse-set-ref (server id parent-id)
+(defmacro nndiscourse-set-ref (server id parent-id)
   "Amongst SERVER refs, associate ID to PARENT-ID."
-  (with-current-buffer (nndiscourse--server-buffer server)
-    (nndiscourse--sethash id parent-id nndiscourse--refs-hashtb)))
+  `(with-current-buffer (nndiscourse--server-buffer ,server)
+     (nndiscourse--sethash ,id ,parent-id nndiscourse--refs-hashtb)))
 
-(defvar-local nndiscourse--categories-hashtb (gnus-make-hashtable)
+(nndiscourse-defvoo nndiscourse--categories-hashtb (gnus-make-hashtable)
   "Category id -> group.  Buffer-local to individual servers' proc buffer.")
-
-(defun nndiscourse-num-categories (server)
-  "Number of categories for SERVER."
-  (with-current-buffer (nndiscourse--server-buffer server)
-    (nndiscourse-hash-count nndiscourse--categories-hashtb)))
-
-(defun nndiscourse-list-categories (server)
-  "List categories for SERVER."
-  (with-current-buffer (nndiscourse--server-buffer server)
-    (nndiscourse-hash-values nndiscourse--categories-hashtb)))
 
 (defun nndiscourse-get-category (server category-id)
   "Amongst SERVER categories, return group for CATEGORY-ID."
+  (declare (indent defun))
   (with-current-buffer (nndiscourse--server-buffer server)
     (nndiscourse--gethash (format "%s" category-id) nndiscourse--categories-hashtb)))
 
-(defun nndiscourse-set-category (server category-id group)
+(defmacro nndiscourse-set-category (server category-id group)
   "Amongst SERVER categories, associate CATEGORY-ID to GROUP."
-  (with-current-buffer (nndiscourse--server-buffer server)
-    (nndiscourse--sethash category-id group nndiscourse--categories-hashtb)))
+  (declare (indent defun))
+  `(with-current-buffer (nndiscourse--server-buffer ,server)
+     (nndiscourse--sethash ,category-id ,group nndiscourse--categories-hashtb)))
 
 (defmacro nndiscourse--with-mutex (mtx &rest body)
   "If capable of threading, lock with MTX and execute BODY."
@@ -327,7 +300,8 @@ Process stays the same, but the `json-rpc' connection (a cheap struct) gets
 reinstantiated with every call.
 
 Return response of METHOD ARGS of type `json-object-type' or nil if failure."
-  (when (nndiscourse-good-server server)
+  (when (and (nndiscourse-good-server server)
+             (nndiscourse-server-opened server))
     (condition-case err
         (let* ((port (nndiscourse-proc-info-port
                       (cdr (assoc server nndiscourse-processes))))
@@ -390,74 +364,84 @@ consider SERVER opened only if it's also current."
   "Retrieve the Jimson process for SERVER.
 
 I am counting on `gnus-check-server` in `gnus-read-active-file-1' in
-`gnus-get-unread-articles' to open server upon install.
-
-DEFS should be non-nil when called fro, `gnus-open-server'.
-"
+`gnus-get-unread-articles' to open server upon install."
   (when (nndiscourse-good-server server)
-    (let ((original-global-rbenv-mode global-rbenv-mode))
-      (unless global-rbenv-mode
-        (let (rbenv-show-active-ruby-in-modeline)
-          (global-rbenv-mode)))
-      (unwind-protect
-          (progn
-            (when defs
-              (nndiscourse--initialize))
-            (nnoo-change-server 'nndiscourse server defs)
-            (let* ((proc-buf (nndiscourse--server-buffer server))
-                   (proc (get-buffer-process proc-buf)))
-              (if (process-live-p proc)
-                  proc
-                (let* ((free-port (with-temp-buffer
-                                    (let ((proc (make-network-process
-                                                 :name "free-port"
-                                                 :noquery t
-                                                 :host nndiscourse-localhost
-                                                 :buffer (current-buffer)
-                                                 :server t
-                                                 :stop t
-                                                 :service t)))
-                                      (prog1 (process-contact proc :service)
-                                        (delete-process proc)))))
-                       (ruby-command (split-string (format "%s exec thor cli:serve %s://%s -p %s"
-                                                           (executable-find "bundle")
-                                                           nndiscourse-scheme
-                                                           server
-                                                           free-port)))
-                       (stderr-buffer (get-buffer-create (format " *%s-stderr*" server))))
-                  (with-current-buffer stderr-buffer
-                    (add-hook 'after-change-functions
-                              (apply-partially #'nndiscourse--message-user server)
-                              nil t))
-                  (nndiscourse-register-process
-                    free-port
-                    (let ((default-directory
-                            (expand-file-name "nndiscourse"
-					      (or nndiscourse-test-dir
-						  (file-name-directory
-						   (or (locate-library "nndiscourse")
-						       default-directory))))))
-                      (let ((new-proc (make-process :name server
-                                                    :buffer proc-buf
-                                                    :command ruby-command
-                                                    :noquery t
-                                                    :sentinel #'nndiscourse-sentinel
-                                                    :stderr stderr-buffer)))
-                        (cl-loop repeat 10
-                                 until (condition-case nil
-                                           (prog1 t
-                                             (delete-process
-                                              (make-network-process :name "test-port"
-                                                                    :noquery t
-                                                                    :host nndiscourse-localhost
-                                                                    :service free-port
-                                                                    :buffer nil
-                                                                    :stop t)))
-                                         (file-error nil))
-                                 do (accept-process-output new-proc 0.3))
-                        new-proc)))))))
-        (unless original-global-rbenv-mode
-          (global-rbenv-mode -1))))))
+    (or (nndiscourse-server-opened server)
+        (let ((original-global-rbenv-mode global-rbenv-mode))
+          (unless global-rbenv-mode
+            (let (rbenv-show-active-ruby-in-modeline)
+              (global-rbenv-mode)))
+          (unwind-protect
+              (progn
+                ;; defs should be non-nil when called from `gnus-open-server'
+                (when defs
+                  (nndiscourse--initialize)
+                  ;; `nnoo-change-server' hackery blesses variables (perl "bless")
+                  (dolist (voodoo (mapcar #'car (nnoo-variables 'nndiscourse)))
+                    (unless (assq voodoo defs)
+                      (-when-let* ((voodoo-lookup (intern-soft (concat (symbol-name voodoo)
+                                                                     "-lookup")))
+                                   (voodoo-lookup-value (symbol-value voodoo-lookup)))
+                        (push (list voodoo (if (functionp voodoo-lookup-value)
+                                               (funcall voodoo-lookup-value)
+                                             voodoo-lookup-value))
+                              defs)))))
+                (gnus-message 5 "holy hell: %s %s" server defs)
+                (nnoo-change-server 'nndiscourse server defs)
+                (let* ((proc-buf (nndiscourse--server-buffer server t))
+                       (proc (get-buffer-process proc-buf)))
+                  (if (process-live-p proc)
+                      proc
+                    (let* ((free-port (with-temp-buffer
+                                        (let ((proc (make-network-process
+                                                     :name "free-port"
+                                                     :noquery t
+                                                     :host nndiscourse-localhost
+                                                     :buffer (current-buffer)
+                                                     :server t
+                                                     :stop t
+                                                     :service t)))
+                                          (prog1 (process-contact proc :service)
+                                            (delete-process proc)))))
+                           (ruby-command (split-string (format "%s exec thor cli:serve %s://%s -p %s"
+                                                               (executable-find "bundle")
+                                                               nndiscourse-scheme
+                                                               server
+                                                               free-port)))
+                           (stderr-buffer (get-buffer-create (format " *%s-stderr*" server))))
+                      (with-current-buffer stderr-buffer
+                        (add-hook 'after-change-functions
+                                  (apply-partially #'nndiscourse--message-user server)
+                                  nil t))
+                      (nndiscourse-register-process
+                        free-port
+                        (let ((default-directory
+                                (expand-file-name "nndiscourse"
+					          (or nndiscourse-test-dir
+						      (file-name-directory
+						       (or (locate-library "nndiscourse")
+						           default-directory))))))
+                          (let ((new-proc (make-process :name server
+                                                        :buffer proc-buf
+                                                        :command ruby-command
+                                                        :noquery t
+                                                        :sentinel #'nndiscourse-sentinel
+                                                        :stderr stderr-buffer)))
+                            (cl-loop repeat 10
+                                     until (condition-case nil
+                                               (prog1 t
+                                                 (delete-process
+                                                  (make-network-process :name "test-port"
+                                                                        :noquery t
+                                                                        :host nndiscourse-localhost
+                                                                        :service free-port
+                                                                        :buffer nil
+                                                                        :stop t)))
+                                             (file-error nil))
+                                     do (accept-process-output new-proc 0.3))
+                            new-proc)))))))
+            (unless original-global-rbenv-mode
+              (global-rbenv-mode -1)))))))
 
 (defun nndiscourse-alist-get (key alist &optional default remove testfn)
   "Replicated library function for emacs-25.
@@ -661,6 +645,7 @@ Originally written by Paul Issartel."
 
 (defun nndiscourse--request-item (id server)
   "Retrieve ID from SERVER as a property list."
+  (push id nndiscourse--debug-request-posts)
   (let* ((port (nndiscourse-proc-info-port (cdr (assoc server nndiscourse-processes))))
          (conn (json-rpc-connect nndiscourse-localhost port))
          (utf-decoder (lambda (x)
@@ -714,33 +699,51 @@ Originally written by Paul Issartel."
     (seq-find (lambda (plst) (= topic-id (plist-get plst :topic_id)))
               headers)))
 
+(defsubst nndiscourse-hash-count (table-or-obarray)
+  "Return number items in TABLE-OR-OBARRAY."
+  (let ((result 0))
+    (nndiscourse--maphash (lambda (&rest _args) (cl-incf result)) table-or-obarray)
+    result))
+
+(defsubst nndiscourse-hash-values (table-or-obarray)
+  "Return right hand sides in TABLE-OR-OBARRAY."
+  (let (result)
+    (nndiscourse--maphash (lambda (_key value) (push value result)) table-or-obarray)
+    result))
+
+(defsubst nndiscourse-hash-keys (table-or-obarray)
+  "Return left hand sides in TABLE-OR-OBARRAY."
+  (let (result)
+    (nndiscourse--maphash (lambda (key _value) (push key result)) table-or-obarray)
+    result))
+
 (defun nndiscourse--incoming (server)
   "Drink from the SERVER firehose."
   (interactive)
-  (when (zerop (nndiscourse-num-categories server))
-    (nndiscourse-request-list server)
-    (gnus-message 5 "holy called: %s %s" server (nndiscourse-num-categories server)))
-  (gnus-message 5 "holy hell: %s %s" server (nndiscourse-num-categories server))
+  (setq nndiscourse--debug-request-posts nil)
+  (when (zerop (nndiscourse-hash-count nndiscourse--categories-hashtb))
+    (nndiscourse-request-list server))
+  (gnus-message 5 "holy hell: %s %s" server (nndiscourse-hash-count nndiscourse--categories-hashtb))
   (cl-loop
    with new-posts
    for page-bottom = 1 then (plist-get (elt posts (1- (length posts))) :id)
    for posts = (nndiscourse-get-posts server :before (1- page-bottom))
    until (null posts)
-   do (unless (nndiscourse-get-last-id server)
-        (nndiscourse-set-last-id server
-                                 (1- (plist-get (elt posts (1- (length posts))) :id))))
+   do (unless nndiscourse--last-id
+        (setq nndiscourse--last-id
+              (1- (plist-get (elt posts (1- (length posts))) :id))))
    do (cl-do* ((k 0 (1+ k))
                (plst (and (< k (length posts)) (elt posts k))
                      (and (< k (length posts)) (elt posts k))))
           ((or (null plst)
-               (<= (plist-get plst :id) (nndiscourse-get-last-id server))))
+               (<= (plist-get plst :id) nndiscourse--last-id)))
         (push plst new-posts))
    until (<= (1- (plist-get (elt posts (1- (length posts))) :id))
-             (nndiscourse-get-last-id server))
+             nndiscourse--last-id)
    finally
    (let ((counts (gnus-make-hashtable)))
      (dolist (plst new-posts)
-       (nndiscourse-set-last-id server (plist-get plst :id))
+       (setq nndiscourse--last-id (plist-get plst :id))
        (-when-let* ((not-deleted (not (plist-get plst :deleted_at)))
                     (type (plist-get plst :post_type))
                     (category-id (plist-get plst :category_id))
@@ -779,7 +782,7 @@ Originally written by Paul Issartel."
            (nconc (nndiscourse-get-headers server group) (list plst)))))
      (gnus-message
       5 (concat "nndiscourse--incoming: "
-                (format "last-id: %s, " (nndiscourse-get-last-id server))
+                (format "last-id: %s, " nndiscourse--last-id)
                 (let ((result ""))
                   (nndiscourse--maphash
                    (lambda (key value)
@@ -789,12 +792,12 @@ Originally written by Paul Issartel."
 
 (deffoo nndiscourse-request-scan (&optional _group server)
   (when (nndiscourse-good-server server)
-    (if (> 2 (- (truncate (float-time)) (nndiscourse-get-last-scan-time server)))
+    (if (> 2 (- (truncate (float-time)) nndiscourse--last-scan-time))
         (gnus-message 7 "nndiscourse-request-scan: last scanned at %s"
-                      (current-time-string (nndiscourse-get-last-scan-time server)))
+                      (current-time-string nndiscourse--last-scan-time))
       (cl-destructuring-bind (seconds num-gc seconds-gc)
           (benchmark-run (nndiscourse--incoming server))
-        (nndiscourse-set-last-scan-time server (truncate (float-time)))
+        (setq nndiscourse--last-scan-time (truncate (float-time)))
         (gnus-message 5 (concat "nndiscourse-request-scan: Took %s seconds,"
                                 " with %s gc runs taking %s seconds")
                       seconds num-gc seconds-gc)))))
@@ -915,10 +918,10 @@ article header.  Gnus manual does say the term `header` is oft conflated."
     'active))
 
 (deffoo nndiscourse-request-list (&optional server)
-  (when (nndiscourse-good-server server)
-    (let ((groups (nndiscourse-list-categories server)))
+  (let ((groups (nndiscourse-hash-values nndiscourse--categories-hashtb)))
+    (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
       (with-current-buffer nntp-server-buffer
-        (unless groups
+	(unless groups
 	  (mapc
 	   (lambda (plst)
 	     (let* ((group (plist-get plst :slug))
@@ -928,8 +931,8 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 	       (erase-buffer)
 	       ;; only `gnus-activate-group' seems to call `gnus-parse-active'
 	       (unless (gnus-get-info full-name)
-	         (gnus-activate-group full-name nil nil `(nndiscourse ,server))
-	         (gnus-group-unsubscribe-group full-name
+		 (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+		 (gnus-group-unsubscribe-group full-name
 					       gnus-level-default-subscribed t))
 	       (nndiscourse-set-category server category-id group)
                (dolist (sub-id subcategory-ids)
