@@ -295,7 +295,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
        (eq 'nndiscourse (car (gnus-group-method group)))))
 
 (deffoo nndiscourse-request-close ()
-  (nndiscourse-close-server)
+  "nnimap does nothing also."
   t)
 
 (deffoo nndiscourse-request-type (_group &optional _article)
@@ -483,6 +483,7 @@ Return PROC if success, nil otherwise."
 (deffoo nndiscourse-close-server (&optional server defs)
   "Patterning after nnimap.el."
   (when (nndiscourse-good-server server)
+    (nndiscourse-deregister-process server)
     (awhen (nndiscourse--server-buffer server)
       (kill-buffer it))
     ;; keep state in nndiscourse-by-server-hashtb?
@@ -925,7 +926,7 @@ article header.  Gnus manual does say the term `header` is oft conflated."
     (gnus-message 2 "nndiscourse-sentinel: process %s %s"
                   (car (process-command process))
                   (replace-regexp-in-string "\n$" "" event))
-    (nndiscourse-deregister-process (process-name process))
+    (nndiscourse-close-server (process-name process))
     (gnus-backlog-shutdown)))
 
 (defun nndiscourse--message-user (server beg end _prev-len)
