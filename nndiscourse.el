@@ -501,11 +501,11 @@ Disambiguate GROUP if it's empty.
 Then execute BODY."
   (declare (debug (form &rest form))
            (indent defun))
-  `(let* ((server (or ,server (nnoo-current-server 'nndiscourse)))
-          (group (or ,group (gnus-group-real-name gnus-newsgroup-name)))
+  `(let* ((group (or ,group (gnus-group-real-name gnus-newsgroup-name)))
           (gnus-newsgroup-name (or gnus-newsgroup-name
                                    (gnus-group-full-name
-                                    group (cons 'nndiscourse (list server))))))
+                                    group (cons 'nndiscourse (list server)))))
+          (server (or ,server (nth 1 (gnus-find-method-for-group gnus-newsgroup-name)))))
      ,@body))
 
 (defsubst nndiscourse--first-article-number (server group)
@@ -518,7 +518,6 @@ Then execute BODY."
 
 (defun nndiscourse--get-header (server group article-number)
   "Amongst SERVER GROUP headers, binary search ARTICLE-NUMBER."
-  (declare (indent defun))
   (let ((headers (nndiscourse-get-headers server group)))
     (cl-flet ((id-of (k) (plist-get (elt headers k) :id)))
       (cl-do* ((x article-number)
@@ -948,13 +947,14 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 (defun nndiscourse--browse-post (&rest _args)
   "What happens when I click on discourse Subject."
   (-when-let* ((group-article gnus-article-current)
+               (server (nth 1 (gnus-find-method-for-group (car group-article))))
                (header (nndiscourse--get-header
-                         (nnoo-current-server 'nndiscourse)
+                         server
                          (gnus-group-real-name (car group-article))
                          (cdr group-article)))
                (url (format "%s://%s/t/%s/%s/%s"
                             nndiscourse-scheme
-                            (nnoo-current-server 'nndiscourse)
+                            server
                             (plist-get header :topic_slug)
                             (plist-get header :topic_id)
                             (plist-get header :post_number))))
@@ -976,9 +976,10 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 
 (defsubst nndiscourse--fallback-link ()
   "Cannot render post."
-  (let* ((header (nndiscourse--get-header (nnoo-current-server 'nndiscourse)
-                   (gnus-group-real-name (car gnus-article-current))
-                   (cdr gnus-article-current)))
+  (let* ((header (nndiscourse--get-header
+                  (nth 1 (gnus-find-method-for-group (car gnus-article-current)))
+                  (gnus-group-real-name (car gnus-article-current))
+                  (cdr gnus-article-current)))
          (body (nndiscourse--massage (plist-get header :cooked))))
     (with-current-buffer gnus-original-article-buffer
       (article-goto-body)
