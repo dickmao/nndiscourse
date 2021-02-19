@@ -1,10 +1,8 @@
-#!/bin/bash
+#!/bin/bash -ex
 
 # Install cask for Travis CI
 # or if already installed, then check for updates
 # Author: gonewest818 https://github.com/clojure-emacs/cider/pull/2139
-
-set -x
 
 WORKDIR=${HOME}/local
 CASKDIR=$WORKDIR/cask
