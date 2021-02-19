@@ -26,6 +26,7 @@
 (require 'ert)
 (require 'message)
 
+(setq ert-runner-profile nil)
 (mapc (lambda (key-params)
         (when (string-match-p (car key-params) "nndiscourse")
           (let ((params (cdr key-params)))

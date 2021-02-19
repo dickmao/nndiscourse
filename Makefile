@@ -27,6 +27,7 @@ README.rst: README.in.rst nndiscourse.el
 clean:
 	$(CASK) clean-elc
 	$(MAKE) -C nndiscourse $@
+	rm -f ert-profile*
 	rm -f tests/log/*
 	rm -rf tests/test-install
 
