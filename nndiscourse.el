@@ -6,7 +6,7 @@
 ;; Version: 0.1.0
 ;; Keywords: news
 ;; URL: https://github.com/dickmao/nndiscourse
-;; Package-Requires: ((emacs "25.1") (dash "20210210") (anaphora "1.0.4") (rbenv "0.0.3") (json-rpc "20200417"))
+;; Package-Requires: ((emacs "25.1") (dash "2.18.1") (anaphora "1.0.4") (rbenv "0.0.3") (json-rpc "0.0.1"))
 
 ;; This file is NOT part of GNU Emacs.
 
