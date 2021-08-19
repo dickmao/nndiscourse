@@ -200,18 +200,17 @@ Starting in emacs-src commit c1b63af, Gnus moved from obarrays to normal hashtab
   (copy-keymap nndiscourse-summary-mode-map)) ;; how does Gnus do this?
 
 (define-minor-mode nndiscourse-article-mode
-  "Minor mode for nndiscourse articles.  Disallow `gnus-article-reply-with-original'.
+  "Minor mode for nndiscourse articles.
+Disallow `gnus-article-reply-with-original'.
 
-\\{gnus-article-mode-map}
-"
+\\{gnus-article-mode-map}"
   :lighter " Discourse"
   :keymap nndiscourse-article-mode-map)
 
 (define-minor-mode nndiscourse-summary-mode
   "Disallow \"reply\" commands in `gnus-summary-mode-map'.
 
-\\{nndiscourse-summary-mode-map}
-"
+\\{nndiscourse-summary-mode-map}"
   :lighter " Discourse"
   :keymap nndiscourse-summary-mode-map)
 
@@ -295,7 +294,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
        (eq 'nndiscourse (car (gnus-group-method group)))))
 
 (deffoo nndiscourse-request-close ()
-  "nnimap does nothing also."
+  "Nnimap does nothing also."
   t)
 
 (deffoo nndiscourse-request-type (_group &optional _article)
@@ -585,7 +584,7 @@ Originally written by Paul Issartel."
                 (symbol-function 'nndiscourse--score-pending)))
 
 (deffoo nndiscourse-request-group-scan (group &optional server info)
-  "M-g from *Group* calls this."
+  "\\[gnus-group-get-new-news-this-group] from *Group* calls this."
   (nndiscourse--with-group server group
     (gnus-message 5 "nndiscourse-request-group-scan: scanning %s..." group)
     (nndiscourse-request-scan nil server)
