@@ -274,10 +274,10 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
         (let* ((port (nndiscourse-proc-info-port
                       (cdr (assoc server nndiscourse-processes))))
                (connection (json-rpc-connect nndiscourse-localhost port)))
-          (set-process-query-on-exit-flag connection t)
           (when-let ((threads-p (fboundp 'set-process-thread))
                      (proc (json-rpc-process connection)))
-            (set-process-thread proc nil))
+            (set-process-thread proc nil)
+            (set-process-query-on-exit-flag proc t))
           (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
             (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
                           (mapconcat (lambda (s) (format "%s" s)) args " "))
