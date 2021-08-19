@@ -277,7 +277,7 @@ Return response of METHOD ARGS of type `json-object-type' or nil if failure."
           (when-let ((threads-p (fboundp 'set-process-thread))
                      (proc (json-rpc-process connection)))
             (set-process-thread proc nil)
-            (set-process-query-on-exit-flag proc t))
+            (set-process-query-on-exit-flag proc nil))
           (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
             (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
                           (mapconcat (lambda (s) (format "%s" s)) args " "))
