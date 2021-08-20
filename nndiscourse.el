@@ -901,11 +901,12 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 	     (let* ((group (plist-get plst :slug))
 		    (category-id (plist-get plst :id))
 		    (full-name (gnus-group-full-name group `(nndiscourse ,server)))
-                    (subcategory-ids (append (plist-get plst :subcategory_ids) nil)))
+                    (subcategory-ids (append (plist-get plst :subcategory_ids) nil))
+                    (must-subscribe (not (gnus-get-info full-name))))
 	       (erase-buffer)
 	       ;; only `gnus-activate-group' seems to call `gnus-parse-active'
-	       (unless (gnus-get-info full-name)
-		 (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+               (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+	       (when must-subscribe
 		 (gnus-group-unsubscribe-group full-name
 					       gnus-level-default-subscribed t))
 	       (nndiscourse-set-category server category-id group)
