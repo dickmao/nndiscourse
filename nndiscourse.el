@@ -271,17 +271,23 @@ reinstantiated with every call.
 Return response of METHOD ARGS of type `json-object-type' or nil if failure."
   (when (and (nndiscourse-good-server server) (nndiscourse-server-opened server))
     (condition-case err
-        (let* ((port (nndiscourse-proc-info-port
-                      (cdr (assoc server nndiscourse-processes))))
-               (connection (json-rpc-connect nndiscourse-localhost port)))
-          (when-let ((threads-p (fboundp 'set-process-thread))
-                     (proc (json-rpc-process connection)))
-            (set-process-thread proc nil)
-            (set-process-query-on-exit-flag proc nil))
-          (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
-            (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
-                          (mapconcat (lambda (s) (format "%s" s)) args " "))
-	    (json-rpc connection method args)))
+        (if-let ((port (nndiscourse-proc-info-port
+                        (cdr (assoc server nndiscourse-processes))))
+                 (connection (json-rpc-connect nndiscourse-localhost port))
+                 (sock (json-rpc-process connection)))
+            (unwind-protect
+                (progn
+                  (set-process-query-on-exit-flag sock nil)
+                  (when (fboundp 'set-process-thread)
+                    (set-process-thread sock nil))
+                  (nndiscourse--with-mutex nndiscourse--mutex-rpc-request
+                    (gnus-message 7 "nndiscourse-rpc-request: send %s %s" method
+                                  (mapconcat (lambda (s) (format "%s" s)) args " "))
+	            (json-rpc connection method args)))
+              (json-rpc-close connection))
+          (error (prog1 nil
+                   (gnus-message 3 "nndiscourse-rpc-request: could not connect to %s:%s"
+                                 nndiscourse-localhost port))))
       (error (prog1 nil
                (gnus-message 3 "nndiscourse-rpc-request: %s" (error-message-string err)))))))
 
