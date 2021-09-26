@@ -23,8 +23,8 @@
 Does not work for sites requiring login
 =======================================
 Some discourse instances allow unfettered public viewing, e.g.,
-emacs-china.org, devforum.roblox.com.  Others require login, e.g.,
-discourse.doomemacs.org.  At the time I wrote nndiscourse, it was
+``emacs-china.org``, ``devforum.roblox.com``.  Others require login, e.g.,
+``discourse.doomemacs.org``.  At the time I wrote nndiscourse, it was
 impossible to get login going, and while `it does seem possible now
 <https://meta.discourse.org/t/user-api-keys-specification/48536/33?u=dickmao>`_,
 it still looks really hard and undocumented.
