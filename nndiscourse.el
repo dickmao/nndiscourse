@@ -870,24 +870,26 @@ article header.  Gnus manual does say the term `header` is oft conflated."
       'nov)))
 
 ;; Primarily because `gnus-get-unread-articles' won't update unreads
-;; upon install (nndiscourse won't yet be in type-cache).
+;; upon install (nndiscourse won't yet be in type-cache),
 ;; I am counting on logic in `gnus-read-active-file-1' in `gnus-get-unread-articles'
 ;; to get here upon install.
-(deffoo nndiscourse-retrieve-groups (groups &optional server)
+(deffoo nndiscourse-retrieve-groups (_groups &optional server)
   (when (nndiscourse-good-server server)
-    ;; utterly insane thing where `gnus-active-to-gnus-format' expects
+    ;; Utterly insane thing where `gnus-active-to-gnus-format' expects
     ;; `gnus-request-list' output to be in `nntp-server-buffer'
     ;; and populates `gnus-active-hashtb'
     (nndiscourse-request-list server)
     (with-current-buffer nntp-server-buffer
-      (gnus-active-to-gnus-format
-       (gnus-server-to-method (format "nndiscourse:%s" server))
-       gnus-active-hashtb nil t))
+      (let (gnus-server-method-cache
+            (gnus-select-method '(nnnil)))
+        (gnus-active-to-gnus-format
+         (gnus-server-to-method (format "nndiscourse:%s" server))
+         gnus-active-hashtb nil t)))
     (mapc (lambda (group)
             (let ((full-name (gnus-group-full-name group `(nndiscourse ,server))))
               (gnus-get-unread-articles-in-group (gnus-get-info full-name)
                                                  (gnus-active full-name))))
-          groups)
+          (nndiscourse-hash-values (nndiscourse-by-server server :categories-hashtb)))
     ;; `gnus-read-active-file-2' will now repeat what I just did.  Brutal.
     'active))
 
@@ -907,8 +909,11 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 	       ;; only `gnus-activate-group' seems to call `gnus-parse-active'
                (gnus-activate-group full-name nil nil `(nndiscourse ,server))
 	       (when must-subscribe
-		 (gnus-group-unsubscribe-group full-name
-					       gnus-level-default-subscribed t))
+                 (funcall (if (fboundp 'gnus-group-set-subscription)
+                              #'gnus-group-set-subscription
+                            (with-no-warnings
+                              #'gnus-group-unsubscribe-group))
+                          full-name gnus-level-default-subscribed t))
 	       (nndiscourse-set-category server category-id group)
                (dolist (sub-id subcategory-ids)
                  (nndiscourse-set-category server sub-id group))
