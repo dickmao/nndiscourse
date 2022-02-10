@@ -900,24 +900,25 @@ article header.  Gnus manual does say the term `header` is oft conflated."
 	(unless groups
 	  (mapc
 	   (lambda (plst)
-	     (let* ((group (plist-get plst :slug))
-		    (category-id (plist-get plst :id))
-		    (full-name (gnus-group-full-name group `(nndiscourse ,server)))
-                    (subcategory-ids (append (plist-get plst :subcategory_ids) nil))
-                    (must-subscribe (not (gnus-get-info full-name))))
-	       (erase-buffer)
-	       ;; only `gnus-activate-group' seems to call `gnus-parse-active'
-               (gnus-activate-group full-name nil nil `(nndiscourse ,server))
-	       (when must-subscribe
-                 (funcall (if (fboundp 'gnus-group-set-subscription)
-                              #'gnus-group-set-subscription
-                            (with-no-warnings
-                              #'gnus-group-unsubscribe-group))
-                          full-name gnus-level-default-subscribed t))
-	       (nndiscourse-set-category server category-id group)
-               (dolist (sub-id subcategory-ids)
-                 (nndiscourse-set-category server sub-id group))
-	       (push group groups)))
+	     (let ((group (plist-get plst :slug)))
+               (when (and group (not (zerop (length group))))
+                 (let* ((category-id (plist-get plst :id))
+	                (full-name (gnus-group-full-name group `(nndiscourse ,server)))
+                        (subcategory-ids (append (plist-get plst :subcategory_ids) nil))
+                        (must-subscribe (not (gnus-get-info full-name))))
+	           (erase-buffer)
+	           ;; only `gnus-activate-group' seems to call `gnus-parse-active'
+                   (gnus-activate-group full-name nil nil `(nndiscourse ,server))
+	           (when must-subscribe
+                     (funcall (if (fboundp 'gnus-group-set-subscription)
+                                  #'gnus-group-set-subscription
+                                (with-no-warnings
+                                  #'gnus-group-unsubscribe-group))
+                              full-name gnus-level-default-subscribed t))
+	           (nndiscourse-set-category server category-id group)
+                   (dolist (sub-id subcategory-ids)
+                     (nndiscourse-set-category server sub-id group))
+	           (push group groups)))))
 	   (nndiscourse-get-categories server)))
         (erase-buffer)
         (mapc (lambda (group)
