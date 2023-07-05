@@ -20,6 +20,12 @@ A Gnus backend for Discourse.
 .. |---| unicode:: U+2014  .. em dash, trimming surrounding whitespace
    :trim:
 
+We Moved To Gitawonk
+====================
+https://gitawonk.com/dickmao/nndiscourse.git
+
+Git paid, not played.
+
 Does not work for sites requiring login
 =======================================
 Some discourse instances allow unfettered public viewing, e.g.,
