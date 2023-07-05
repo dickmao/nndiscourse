@@ -1,0 +1,9 @@
+# frozen_string_literal: true
+
+source 'https://rubygems.org'
+
+gem 'discourse_api', github: 'dickmao/discourse_api', branch: 'dev'
+gem 'jimson', github: 'dickmao/jimson', branch: 'next'
+
+# Specify your gem's dependencies in nndiscourse.gemspec
+gemspec

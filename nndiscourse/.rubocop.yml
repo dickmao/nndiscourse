@@ -1,0 +1,13 @@
+AllCops:
+  Exclude:
+    - 'db/**/*'
+    - 'config/**/*'
+    - 'script/**/*'
+    - 'vendor/**/*'
+    - 'bin/**/*'
+    - !ruby/regexp /old_and_unused\.rb$/
+
+Layout/LineLength:
+  Max: 100
+  Exclude:
+    - !ruby/regexp /.*\.gemspec$/
