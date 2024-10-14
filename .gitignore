@@ -1,0 +1,13 @@
+*.elc
+.cask
+nndiscourse-autoloads.el
+.rspec
+bin/
+vendor/
+nndiscourse*.gem
+dist/
+.bundle
+tests/Mail
+tests/News
+tests/.newsrc
+.ecukes*
